@@ -1,0 +1,2 @@
+# Cópia fiel do Street: manter os bytes exatos (check:destino compara sha256)
+src/domain/destino/* -text
