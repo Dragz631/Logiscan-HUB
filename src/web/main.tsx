@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { OperadorCtx, useRota } from './contexto';
 import './estilo.css';
 import { Ajudantes } from './paginas/Ajudantes';
+import { CargaPagina } from './paginas/Carga';
+import { Cargas } from './paginas/Cargas';
 import { Importar } from './paginas/Importar';
 import { Inventario } from './paginas/Inventario';
 import { LotePagina } from './paginas/Lote';
@@ -40,6 +42,8 @@ function App() {
   else if (pagina === 'importacoes' && id) conteudo = <LotePagina id={id} />;
   else if (pagina === 'pacotes' && id) conteudo = <PacotePagina id={id} />;
   else if (pagina === 'ajudantes') conteudo = <Ajudantes />;
+  else if (pagina === 'cargas' && id) conteudo = <CargaPagina id={id} />;
+  else if (pagina === 'cargas') conteudo = <Cargas />;
   else conteudo = <Inventario />;
 
   const ativo = (p: string) => ((pagina ?? '') === p ? 'ativo' : '');
@@ -52,6 +56,7 @@ function App() {
         <nav>
           <a href="#/" className={ativo('')}>Inventário</a>
           <a href="#/importar" className={ativo('importar') || ativo('importacoes')}>Importar</a>
+          <a href="#/cargas" className={ativo('cargas')}>Cargas</a>
           <a href="#/ajudantes" className={ativo('ajudantes')}>Ajudantes</a>
         </nav>
         <label className="operador">

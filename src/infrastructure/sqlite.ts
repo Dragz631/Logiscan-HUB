@@ -12,12 +12,14 @@ import type {
   ItemLote,
   Lote,
   RepositorioAjudantes,
+  RepositorioCargas,
   RepositorioDestinos,
   RepositorioEventos,
   RepositorioLotes,
   RepositorioPacotes,
   StatusLote,
 } from '../application/portas';
+import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import { chaveTexto } from '../domain/destino/texto';
 import type { Evento } from '../domain/eventos';
@@ -72,6 +74,7 @@ function pacoteDaLinha(r: Linha): Pacote {
     destinoCandidatos: parse(r.destino_candidatos),
     estado: String(r.estado) as Pacote['estado'],
     responsavelId: str(r.responsavel_id),
+    cargaId: str(r.carga_id),
     pendencias: parse(r.pendencias),
     origem: {
       loteId: String(r.origem_lote_id),
@@ -126,15 +129,15 @@ class Pacotes implements RepositorioPacotes {
       p.transportadora, p.codigo, p.dados.destinatario, p.dados.rua, p.dados.ruaDetalhe, p.dados.numero,
       p.dados.complemento, p.dados.bairro, p.dados.cidade, p.dados.uf, p.dados.cep, p.destinoId,
       json(p.destinoCandidatos), p.estado, p.responsavelId, json(p.pendencias), p.origem.loteId,
-      p.origem.arquivo, p.origem.card, p.criadoEm, p.atualizadoEm, p.versao,
+      p.origem.arquivo, p.origem.card, p.criadoEm, p.atualizadoEm, p.versao, p.cargaId,
     ];
     if (versaoEsperada === null) {
       this.db
         .prepare(
           `INSERT INTO pacotes (transportadora, codigo, destinatario, rua, rua_detalhe, numero, complemento, bairro,
             cidade, uf, cep, destino_id, destino_candidatos, estado, responsavel_id, pendencias, origem_lote_id,
-            origem_arquivo, origem_card, criado_em, atualizado_em, versao, id)
-           VALUES (${new Array(23).fill('?').join(',')})`,
+            origem_arquivo, origem_card, criado_em, atualizado_em, versao, carga_id, id)
+           VALUES (${new Array(24).fill('?').join(',')})`,
         )
         .run(...valores, p.id);
       return;
@@ -143,7 +146,7 @@ class Pacotes implements RepositorioPacotes {
       .prepare(
         `UPDATE pacotes SET transportadora=?, codigo=?, destinatario=?, rua=?, rua_detalhe=?, numero=?, complemento=?,
           bairro=?, cidade=?, uf=?, cep=?, destino_id=?, destino_candidatos=?, estado=?, responsavel_id=?, pendencias=?,
-          origem_lote_id=?, origem_arquivo=?, origem_card=?, criado_em=?, atualizado_em=?, versao=?
+          origem_lote_id=?, origem_arquivo=?, origem_card=?, criado_em=?, atualizado_em=?, versao=?, carga_id=?
          WHERE id=? AND versao=?`,
       )
       .run(...valores, p.id, versaoEsperada);
@@ -341,6 +344,68 @@ class Ajudantes implements RepositorioAjudantes {
   }
 }
 
+class Cargas implements RepositorioCargas {
+  constructor(private db: DatabaseSync) {}
+
+  private montar = (r: Linha): Carga => ({
+    id: String(r.id),
+    codigo: String(r.codigo),
+    ajudante: { id: String(r.ajudante_id), nome: String(r.ajudante_nome) },
+    pacoteIds: this.db
+      .prepare('SELECT pacote_id FROM cargas_pacotes WHERE carga_id = ? ORDER BY ordem')
+      .all(String(r.id))
+      .map((x) => String(x.pacote_id)),
+    criadaEm: String(r.criada_em),
+    criadaPor: String(r.criada_por),
+  });
+
+  porId(id: string) {
+    const r = this.db.prepare('SELECT * FROM cargas WHERE id = ?').get(id);
+    return r ? this.montar(r) : undefined;
+  }
+
+  listar() {
+    return this.db.prepare('SELECT * FROM cargas ORDER BY criada_em DESC, codigo DESC').all().map(this.montar);
+  }
+
+  contarPorPrefixo(prefixo: string) {
+    const r = this.db.prepare('SELECT COUNT(*) AS n FROM cargas WHERE codigo LIKE ?').get(`${prefixo}%`);
+    return Number(r?.n ?? 0);
+  }
+
+  criar(c: Carga) {
+    this.db
+      .prepare('INSERT INTO cargas (id, codigo, ajudante_id, ajudante_nome, criada_em, criada_por) VALUES (?,?,?,?,?,?)')
+      .run(c.id, c.codigo, c.ajudante.id, c.ajudante.nome, c.criadaEm, c.criadaPor);
+    const ins = this.db.prepare('INSERT INTO cargas_pacotes (carga_id, pacote_id, ordem) VALUES (?,?,?)');
+    c.pacoteIds.forEach((p, i) => ins.run(c.id, p, i));
+  }
+
+  anexarEvento(e: EventoCarga) {
+    this.db
+      .prepare('INSERT INTO eventos_carga (id, carga_id, tipo, dados, ator, ocorrido_em, registrado_em) VALUES (?,?,?,?,?,?,?)')
+      .run(e.id, e.cargaId, e.tipo, json(e.dados), e.ator, e.ocorridoEm, e.registradoEm);
+  }
+
+  eventos(cargaId: string) {
+    return this.db
+      .prepare('SELECT * FROM eventos_carga WHERE carga_id = ? ORDER BY seq')
+      .all(cargaId)
+      .map(
+        (r) =>
+          ({
+            id: String(r.id),
+            cargaId: String(r.carga_id),
+            tipo: String(r.tipo),
+            dados: parse(r.dados),
+            ator: String(r.ator),
+            ocorridoEm: String(r.ocorrido_em),
+            registradoEm: String(r.registrado_em),
+          }) as EventoCarga,
+      );
+  }
+}
+
 export function criarArmazemSqlite(db: DatabaseSync): Armazem {
   let profundidade = 0;
   return {
@@ -349,6 +414,7 @@ export function criarArmazemSqlite(db: DatabaseSync): Armazem {
     destinos: new Destinos(db),
     lotes: new Lotes(db),
     ajudantes: new Ajudantes(db),
+    cargas: new Cargas(db),
     transacao<T>(fn: () => T): T {
       if (profundidade > 0) return fn(); // já dentro de uma transação
       db.exec('BEGIN IMMEDIATE');

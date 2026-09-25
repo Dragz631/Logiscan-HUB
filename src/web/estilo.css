@@ -148,3 +148,7 @@ tr.marcada td { background: var(--marcada); }
   .operador input { flex: 1; }
   .timeline li { grid-template-columns: 1fr; gap: 0; }
 }
+
+.lista-marcar { list-style: none; padding: 0; margin: 0.6rem 0; max-height: 18rem; overflow: auto; }
+.lista-marcar li { padding: 0.2rem 0; }
+.cartao select { width: 100%; }

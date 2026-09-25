@@ -2,6 +2,7 @@
  * PORTAS — o que a aplicação precisa do mundo externo, sem saber COMO é feito.
  * A infraestrutura (SQLite, pasta de provas…) implementa; os testes usam SQLite em memória.
  */
+import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import type { Evento } from '../domain/eventos';
 import type { DecisaoConflito, ItemPrevia } from '../domain/importacao';
@@ -85,6 +86,16 @@ export interface RepositorioAjudantes {
   criar(a: Ajudante): void;
 }
 
+export interface RepositorioCargas {
+  porId(id: string): Carga | undefined;
+  listar(): Carga[];
+  /** Quantas cargas já têm código começando com este prefixo (sequência do dia). */
+  contarPorPrefixo(prefixo: string): number;
+  criar(c: Carga): void;
+  anexarEvento(e: EventoCarga): void;
+  eventos(cargaId: string): EventoCarga[];
+}
+
 /** Tudo que precisa ser gravado junto, numa transação. */
 export interface Armazem {
   pacotes: RepositorioPacotes;
@@ -92,6 +103,7 @@ export interface Armazem {
   destinos: RepositorioDestinos;
   lotes: RepositorioLotes;
   ajudantes: RepositorioAjudantes;
+  cargas: RepositorioCargas;
   transacao<T>(fn: () => T): T;
 }
 

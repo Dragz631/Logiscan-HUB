@@ -5,3 +5,4 @@ dados/
 *.db-wal
 *.db-shm
 dados-teste/
+dados-ponte-teste/

@@ -59,10 +59,16 @@ export function PacotePagina({ id }: { id: string }) {
           <h3>Status</h3>
           <Estado estado={p.estado} />
           {p.pendencias.length > 0 && <span className="selo alerta">revisão pendente</span>}
+          {p.cargaId && (
+            <p className="fraco">
+              Carga: <a href={`#/cargas/${p.cargaId}`}>ver carga</a>
+            </p>
+          )}
         </div>
         <div className="cartao">
           <h3>Com quem está</h3>
           <p className="grande">{d.responsavel?.nome ?? <span className="fraco">No galpão (sem responsável)</span>}</p>
+          {(p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO') ? (
           <div className="linha">
             <select value={alvo} onChange={(e) => setAlvo(e.target.value)}>
               <option value="">{d.responsavel ? 'Passar para…' : 'Entregar a…'}</option>
@@ -76,6 +82,9 @@ export function PacotePagina({ id }: { id: string }) {
               Entregar ao ajudante
             </button>
           </div>
+          ) : (
+            <p className="fraco">Na rua ou com desfecho: a responsabilidade só muda pelo retorno da carga.</p>
+          )}
         </div>
         <div className="cartao">
           <h3>Destinatário (etiqueta)</h3>

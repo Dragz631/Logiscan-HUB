@@ -68,12 +68,34 @@ export type EventoAtribuido = Base<'ATRIBUIDO', { ajudante: AjudanteRef }>;
 /** Troca de responsável: o antigo fica registrado. */
 export type EventoReatribuido = Base<'REATRIBUIDO', { de: AjudanteRef; para: AjudanteRef }>;
 
+export interface CargaRef {
+  id: string;
+  codigo: string;
+}
+
+/** O pacote foi despachado para a rua dentro de uma carga do ajudante responsável. */
+export type EventoSaiuParaRota = Base<'SAIU_PARA_ROTA', { carga: CargaRef; ajudante: AjudanteRef }>;
+
+/**
+ * Entrega registrada pelo ajudante no Street (retorno da carga).
+ * `idEventoStreet` é o id gerado no celular — a mesma entrega reenviada não vira duas.
+ * Sem provas nesta etapa: só o fato, quem registrou, quando e (se informado) quem recebeu.
+ */
+export type EventoEntregaRegistrada = Base<'ENTREGA_REGISTRADA', {
+  carga: CargaRef;
+  ajudante: AjudanteRef;
+  idEventoStreet: string;
+  recebedor: { tipo: string; detalhes: string } | null;
+}>;
+
 export type Evento =
   | EventoImportado
   | EventoConflitoResolvido
   | EventoDestinoConfirmado
   | EventoAtribuido
-  | EventoReatribuido;
+  | EventoReatribuido
+  | EventoSaiuParaRota
+  | EventoEntregaRegistrada;
 
 export type TipoEvento = Evento['tipo'];
 
@@ -82,8 +104,6 @@ export type TipoEvento = Evento['tipo'];
  * Declarados para a arquitetura já conhecê-los; o domínio RECUSA enquanto não forem implementados.
  */
 export const TIPOS_FUTUROS = [
-  'SAIU_PARA_ROTA',
-  'ENTREGA_REGISTRADA',
   'INSUCESSO_REGISTRADO',
   'PROVA_RECEBIDA',
   'RETORNADO_AO_GALPAO',
@@ -119,6 +139,7 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
       destinoCandidatos: d.destinoCandidatos,
       estado: 'NAO_ATRIBUIDO',
       responsavelId: null,
+      cargaId: null,
       pendencias: pendenciasDestino(d.destinoId, d.destinoCandidatos),
       origem: d.origem,
       criadoEm: e.ocorridoEm,
@@ -168,6 +189,25 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
         throw new ErroDominio('TRANSICAO_INVALIDA', `não é possível reatribuir um pacote em ${atual.estado}`);
       }
       return { ...base, estado: 'ATRIBUIDO', responsavelId: e.dados.para.id };
+    case 'SAIU_PARA_ROTA':
+      if (atual.responsavelId !== e.dados.ajudante.id) {
+        throw new ErroDominio('NAO_E_DO_AJUDANTE', `o pacote não está com ${e.dados.ajudante.nome}`);
+      }
+      if (!podeTransitar(atual.estado, 'EM_ROTA')) {
+        throw new ErroDominio('TRANSICAO_INVALIDA', `pacote em ${atual.estado} não pode sair para rota`);
+      }
+      return { ...base, estado: 'EM_ROTA', cargaId: e.dados.carga.id };
+    case 'ENTREGA_REGISTRADA':
+      if (atual.cargaId !== e.dados.carga.id) {
+        throw new ErroDominio('FORA_DA_CARGA', `o pacote não está na carga ${e.dados.carga.codigo}`);
+      }
+      if (atual.responsavelId !== e.dados.ajudante.id) {
+        throw new ErroDominio('NAO_E_DO_AJUDANTE', `o pacote não está com ${e.dados.ajudante.nome}`);
+      }
+      if (!podeTransitar(atual.estado, 'ENTREGUE')) {
+        throw new ErroDominio('TRANSICAO_INVALIDA', `pacote em ${atual.estado} não pode ser dado como entregue`);
+      }
+      return { ...base, estado: 'ENTREGUE' };
   }
 }
 
@@ -194,5 +234,12 @@ export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string)
       return `Entregue ao ajudante ${e.dados.ajudante.nome} (responsabilidade transferida)`;
     case 'REATRIBUIDO':
       return `Reatribuído: ${e.dados.de.nome} → ${e.dados.para.nome} (responsabilidade transferida)`;
+    case 'SAIU_PARA_ROTA':
+      return `Saiu para rota com ${e.dados.ajudante.nome} na carga ${e.dados.carga.codigo}`;
+    case 'ENTREGA_REGISTRADA': {
+      const r = e.dados.recebedor;
+      const quem = r && r.detalhes ? ` — recebido por ${r.detalhes}${r.tipo ? ` (${r.tipo.replace(/_/g, ' ')})` : ''}` : '';
+      return `Entrega registrada no Street por ${e.dados.ajudante.nome}${quem}`;
+    }
   }
 }

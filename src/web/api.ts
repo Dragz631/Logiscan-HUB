@@ -1,4 +1,7 @@
 /** Cliente da API do HUB. A tela só conversa com o backend por aqui. */
+import type { DetalheCarga, ResultadoRetorno, ResumoCarga } from '../application/cargas';
+import type { DocumentoCargaV0 } from '../contracts/cargaV0';
+import type { Pacote } from '../domain/pacote';
 import type { DetalhePacote, LinhaInventario, ResumoInventario } from '../application/consultas';
 import type { ResultadoConfirmacao, ResultadoPreparo, VisaoLote } from '../application/importacao';
 import type { ResultadoAtribuicaoItem } from '../application/operacao';
@@ -39,5 +42,14 @@ export const api = {
   decidir: (id: string, indice: number, decisao: DecisaoConflito) =>
     chamar<VisaoLote>(`/importacoes/${id}/itens/${indice}/decisao`, { body: { decisao } }),
   confirmar: (id: string, ator: string) => chamar<ResultadoConfirmacao>(`/importacoes/${id}/confirmar`, { body: { ator } }),
+  prontosParaCarga: (ajudanteId: string) => chamar<Pacote[]>(`/ajudantes/${ajudanteId}/prontos-para-carga`),
+  cargas: () => chamar<ResumoCarga[]>('/cargas'),
+  carga: (id: string) => chamar<DetalheCarga>(`/cargas/${id}`),
+  criarCarga: (ajudanteId: string, pacoteIds: string[], ator: string) =>
+    chamar<{ id: string; codigo: string }>('/cargas', { body: { ajudanteId, pacoteIds, ator } }),
+  exportarCarga: (id: string, ator: string) =>
+    chamar<{ arquivo: string; documento: DocumentoCargaV0 }>(`/cargas/${id}/exportar`, { body: { ator } }),
+  receberRetorno: (arquivo: string, conteudo: string) =>
+    chamar<ResultadoRetorno | { ok: false; erros: string[] }>('/retornos-street', { body: { arquivo, conteudo } }),
   descartar: (id: string) => chamar<VisaoLote>(`/importacoes/${id}/descartar`, { method: 'POST', body: {} }),
 };

@@ -34,6 +34,26 @@ Requer Node 24+ (usa o SQLite embutido `node:sqlite`).
 5. **Entregar ao ajudante** (um ou vários) → `ATRIBUIDO` / `REATRIBUIDO` (responsabilidade transferida).
 6. **Pacote**: status, com quem está, destino, origem e a linha do tempo.
 
+## Ponte HUB → CARGA → STREET → HUB (V0.2, dados locais)
+
+```
+HUB: pacotes ATRIBUIDOS ao ajudante ──criar carga──▶ EM_ROTA  (evento SAIU_PARA_ROTA)
+HUB ──arquivo logiscan.carga/v0──▶ Street  (só os pacotes daquele ajudante)
+Street: entrega de teste ──▶ fila local ──arquivo logiscan.street-eventos/v0──▶ HUB
+HUB: ENTREGA_REGISTRADA na timeline do pacote ──▶ ENTREGUE
+```
+
+- **Carga**: código legível (`C-AAAAMMDD-AJUDANTE-n`), ajudante, pacotes, quem/quando criou e histórico
+  próprio (`CARGA_CRIADA`, `CARGA_EXPORTADA`, `RETORNO_RECEBIDO`) em `eventos_carga` (append-only).
+  Situação (na rua / concluída) é derivada dos pacotes.
+- **Contratos**: `src/contracts/cargaV0.ts` (HUB→Street) e `src/contracts/streetEventosV0.ts` (Street→HUB).
+  O Street tem a sua própria representação em `SafaSanha/src/domain/cargaHub.ts` — nenhum projeto importa código do outro.
+- **Idempotência**: cada evento do Street tem `id_evento` determinístico; reenviar o arquivo não duplica.
+  O que não pode ser aplicado (pacote fora da carga, outro ajudante, tipo desconhecido, data inválida,
+  pacote já entregue) é **recusado com motivo** e fica no histórico da carga.
+- Pacote em rota não pode ser reatribuído nem entrar em outra carga.
+- Fora desta etapa: insucesso, provas/fotos, Esteira, sincronização pela rede (o mesmo documento vai viajar por ela).
+
 ## Arquitetura
 
 ```

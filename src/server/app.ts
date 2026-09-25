@@ -4,6 +4,14 @@
  */
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
+import {
+  criarCarga,
+  detalharCarga,
+  exportarCarga,
+  listarCargas,
+  pacotesParaCarga,
+  receberRetornoStreet,
+} from '../application/cargas';
 import { detalharPacote, listarPacotes, resumoInventario } from '../application/consultas';
 import { ErroAplicacao } from '../application/erros';
 import {
@@ -28,6 +36,7 @@ const Esquemas = {
   ajudante: z.object({ nome: z.string() }),
   entregar: z.object({ pacoteIds: z.array(z.string()).min(1), ajudanteId: z.string(), ator, chave: z.string().min(1) }),
   destino: z.object({ destinoId: z.string().nullable(), ator, chave: z.string().min(1) }),
+  carga: z.object({ ajudanteId: z.string().min(1), pacoteIds: z.array(z.string()).min(1), ator }),
   filtro: z.object({
     estado: z.enum(ESTADOS).optional(),
     responsavelId: z.string().optional(),
@@ -113,6 +122,33 @@ export function criarApi(ctx: Contexto): express.Router {
   api.post('/importacoes/:id/descartar', (req, res) => {
     descartarLote(ctx, req.params.id);
     res.json(verLote(ctx, req.params.id));
+  });
+
+  api.get('/ajudantes/:id/prontos-para-carga', (req, res) => {
+    res.json(pacotesParaCarga(ctx, req.params.id));
+  });
+
+  api.get('/cargas', (_req, res) => {
+    res.json(listarCargas(ctx));
+  });
+
+  api.post('/cargas', (req, res) => {
+    res.status(201).json(criarCarga(ctx, corpo(Esquemas.carga, req.body)));
+  });
+
+  api.get('/cargas/:id', (req, res) => {
+    res.json(detalharCarga(ctx, req.params.id));
+  });
+
+  /** Gera o documento logiscan.carga/v0 (e registra a exportação no histórico da carga). */
+  api.post('/cargas/:id/exportar', (req, res) => {
+    res.json(exportarCarga(ctx, req.params.id, corpo(Esquemas.confirmar, req.body).ator));
+  });
+
+  /** Recebe o arquivo logiscan.street-eventos/v0 devolvido pelo Street. */
+  api.post('/retornos-street', (req, res) => {
+    const r = receberRetornoStreet(ctx, corpo(Esquemas.importar, req.body));
+    res.status(r.ok ? 200 : 422).json(r);
   });
 
   api.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

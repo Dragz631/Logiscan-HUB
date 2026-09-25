@@ -79,6 +79,8 @@ export interface Pacote {
   destinoCandidatos: string[];
   estado: EstadoPacote;
   responsavelId: string | null;
+  /** Carga em que o pacote saiu para a rua (null = no galpão / ainda não despachado). */
+  cargaId: string | null;
   pendencias: Pendencia[];
   origem: OrigemPacote;
   criadoEm: string;
