@@ -8,6 +8,7 @@
  *
  * Dois códigos diferentes NUNCA se fundem, mesmo com mesmo endereço/nome/número.
  */
+import type { ConfirmacaoEntrega } from './confirmacao';
 import { chaveTexto, limparEspacos } from './destino/texto';
 
 /**
@@ -79,8 +80,12 @@ export interface Pacote {
   destinoCandidatos: string[];
   estado: EstadoPacote;
   responsavelId: string | null;
-  /** Carga em que o pacote saiu para a rua (null = no galpão / ainda não despachado). */
+  /** Carga do pacote (montada ou na rua). null = no galpão, fora de carga. */
   cargaId: string | null;
+  /** Só com estado ENTREGUE: o que falta para a entrega ser considerada confirmada (baixa). */
+  confirmacaoEntrega: ConfirmacaoEntrega | null;
+  /** Só com estado INSUCESSO: motivo do último insucesso (o histórico guarda todos). */
+  motivoInsucesso: string | null;
   pendencias: Pendencia[];
   origem: OrigemPacote;
   criadoEm: string;

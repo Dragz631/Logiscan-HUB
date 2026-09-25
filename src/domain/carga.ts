@@ -4,9 +4,11 @@
  * CARGA ≠ PACOTE: a carga tem identidade, dono (ajudante), horários e histórico PRÓPRIOS;
  * cada pacote continua com a sua timeline (o evento SAIU_PARA_ROTA aponta para a carga).
  *
- * Situação da carga é DERIVADA dos pacotes (nunca guardada à parte, para não divergir):
- *   EM_ROTA   → ainda há pacote dela na rua;
- *   CONCLUIDA → todos os pacotes dela já tiveram desfecho.
+ * Situação da carga:
+ *   MONTADA   → criada, pacotes separados para o ajudante, ainda no galpão (ATRIBUIDOS);
+ *   EM_ROTA   → o operador INICIOU A ROTA (ação explícita, com horário próprio);
+ *   CONCLUIDA → rota iniciada e todos os pacotes com desfecho (entregue ou insucesso).
+ * Criar a carga NUNCA é evidência de que o ajudante saiu para a rua.
  */
 import type { AjudanteRef } from './eventos';
 import type { EstadoPacote } from './pacote';
@@ -19,6 +21,9 @@ export interface Carga {
   pacoteIds: string[];
   criadaEm: string;
   criadaPor: string;
+  /** Quando/quem iniciou a rota. null = carga só montada. */
+  rotaIniciadaEm: string | null;
+  rotaIniciadaPor: string | null;
 }
 
 interface BaseEventoCarga<T extends string, D> {
@@ -33,6 +38,7 @@ interface BaseEventoCarga<T extends string, D> {
 
 export type EventoCarga =
   | BaseEventoCarga<'CARGA_CRIADA', { ajudante: AjudanteRef; quantidade: number }>
+  | BaseEventoCarga<'ROTA_INICIADA', { quantidade: number }>
   | BaseEventoCarga<'CARGA_EXPORTADA', { arquivo: string }>
   | BaseEventoCarga<'RETORNO_RECEBIDO', {
       arquivo: string;
@@ -41,11 +47,12 @@ export type EventoCarga =
       recusados: { idEventoStreet: string; codigo: string; motivo: string }[];
     }>;
 
-export type SituacaoCarga = 'EM_ROTA' | 'CONCLUIDA';
+export type SituacaoCarga = 'MONTADA' | 'EM_ROTA' | 'CONCLUIDA';
 
-const DESFECHO: EstadoPacote[] = ['ENTREGUE', 'RETORNADO', 'PRONTO_PARA_BAIXA', 'BAIXADO'];
+const DESFECHO: EstadoPacote[] = ['ENTREGUE', 'INSUCESSO', 'RETORNADO', 'PRONTO_PARA_BAIXA', 'BAIXADO'];
 
-export function situacaoCarga(estados: EstadoPacote[]): SituacaoCarga {
+export function situacaoCarga(rotaIniciadaEm: string | null, estados: EstadoPacote[]): SituacaoCarga {
+  if (!rotaIniciadaEm) return 'MONTADA';
   return estados.length > 0 && estados.every((e) => DESFECHO.includes(e)) ? 'CONCLUIDA' : 'EM_ROTA';
 }
 
@@ -70,12 +77,14 @@ export function prefixoCarga(agoraIso: string, nomeAjudante: string): string {
 export function descreverEventoCarga(e: EventoCarga): string {
   switch (e.tipo) {
     case 'CARGA_CRIADA':
-      return `Carga criada para ${e.dados.ajudante.nome} com ${e.dados.quantidade} pacote(s)`;
+      return `Carga montada para ${e.dados.ajudante.nome} com ${e.dados.quantidade} pacote(s)`;
+    case 'ROTA_INICIADA':
+      return `Rota iniciada: ${e.dados.quantidade} pacote(s) saíram para a rua`;
     case 'CARGA_EXPORTADA':
       return `Arquivo da carga gerado para o Street (${e.dados.arquivo})`;
     case 'RETORNO_RECEBIDO': {
       const d = e.dados;
-      const partes = [`${d.aceitos} evento(s) registrado(s)`];
+      const partes = [`${d.aceitos} acontecimento(s) registrado(s)`];
       if (d.repetidos) partes.push(`${d.repetidos} repetido(s) ignorado(s)`);
       if (d.recusados.length) partes.push(`${d.recusados.length} recusado(s)`);
       return `Retorno do Street recebido (${d.arquivo}): ${partes.join(', ')}`;

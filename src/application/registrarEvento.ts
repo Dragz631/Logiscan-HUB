@@ -28,3 +28,24 @@ export function registrarEvento(armazem: Armazem, e: Evento): ResultadoRegistro 
   armazem.pacotes.salvar(novo, atual ? atual.versao : null);
   return { gravado: true, evento: e, pacote: novo };
 }
+
+/**
+ * Recalcula o estado atual de cada pacote a partir do histórico e grava onde divergir.
+ * Usado depois de migrações que acrescentam campos à projeção (o histórico é a fonte da verdade).
+ * Não toca nos eventos. Devolve quantos pacotes foram atualizados.
+ */
+export function reprojetarPacotes(armazem: Armazem): number {
+  return armazem.transacao(() => {
+    let n = 0;
+    for (const atual of armazem.pacotes.listar()) {
+      const eventos = armazem.eventos.doPacote(atual.id);
+      if (eventos.length === 0) continue;
+      const certo = eventos.reduce<Pacote | null>((p, e) => aplicarEvento(p, e), null);
+      if (certo && JSON.stringify(certo) !== JSON.stringify(atual)) {
+        armazem.pacotes.salvar(certo, atual.versao);
+        n++;
+      }
+    }
+    return n;
+  });
+}

@@ -8,6 +8,7 @@ import {
   criarCarga,
   detalharCarga,
   exportarCarga,
+  iniciarRota,
   listarCargas,
   pacotesParaCarga,
   receberRetornoStreet,
@@ -138,6 +139,11 @@ export function criarApi(ctx: Contexto): express.Router {
 
   api.get('/cargas/:id', (req, res) => {
     res.json(detalharCarga(ctx, req.params.id));
+  });
+
+  /** Ação explícita do operador: a carga montada sai para a rua. */
+  api.post('/cargas/:id/iniciar-rota', (req, res) => {
+    res.json(iniciarRota(ctx, req.params.id, corpo(Esquemas.confirmar, req.body).ator));
   });
 
   /** Gera o documento logiscan.carga/v0 (e registra a exportação no histórico da carga). */

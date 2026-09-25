@@ -30,23 +30,42 @@ export function CargaPagina({ id }: { id: string }) {
     }
   }
 
-  const naRua = c.porEstado.EM_ROTA ?? 0;
+  async function iniciar() {
+    const ator = exigir();
+    if (!ator) return;
+    if (!confirm(`Iniciar a rota da carga ${c!.codigo}? Os ${c!.total} pacote(s) passam a estar na rua com ${c!.ajudante.nome}.`)) return;
+    try {
+      await api.iniciarRota(id, ator);
+      setMsg({ tipo: 'ok', texto: 'Rota iniciada.' });
+      det.recarregar();
+    } catch (e) {
+      setMsg({ tipo: 'erro', texto: (e as Error).message });
+    }
+  }
+
+  const paraLevar = (c.porEstado.EM_ROTA ?? 0) + (c.porEstado.ATRIBUIDO ?? 0);
   return (
     <section>
       <p><a href="#/cargas">← Cargas</a></p>
       <h1 className="codigo">{c.codigo}</h1>
       <p className="fraco">
-        {c.ajudante.nome} · criada {dataHora(c.criadaEm)} por {c.criadaPor} · {ROTULO_SITUACAO[c.situacao]}
+        {c.ajudante.nome} · montada {dataHora(c.criadaEm)} por {c.criadaPor}
+        {c.rotaIniciadaEm && ` · rota iniciada ${dataHora(c.rotaIniciadaEm)} por ${c.rotaIniciadaPor}`} · {ROTULO_SITUACAO[c.situacao]}
       </p>
       {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
 
       <div className="barra-acao">
         <span>
-          <b>2 · Levar para o Street:</b> {naRua} pacote(s) na rua.
+          <b>2 · Levar para o Street:</b> {paraLevar} pacote(s) sem desfecho.
         </span>
-        <button type="button" className="primario" disabled={naRua === 0} onClick={baixar}>
+        <button type="button" disabled={paraLevar === 0} onClick={baixar}>
           Baixar arquivo da carga
         </button>
+        {c.situacao === 'MONTADA' && (
+          <button type="button" className="primario" onClick={iniciar}>
+            Iniciar rota
+          </button>
+        )}
       </div>
 
       <div className="tabela-rolagem">

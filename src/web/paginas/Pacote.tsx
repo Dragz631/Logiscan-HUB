@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { rotuloDestino } from '../../domain/destinoPacote';
 import { api } from '../api';
 import { useOperador } from '../contexto';
+import { ROTULO_REQUISITO } from '../../domain/confirmacao';
 import { dataHora } from '../formato';
 import { Aviso, Estado, useCarregar } from './comum';
 
@@ -59,6 +60,14 @@ export function PacotePagina({ id }: { id: string }) {
           <h3>Status</h3>
           <Estado estado={p.estado} />
           {p.pendencias.length > 0 && <span className="selo alerta">revisão pendente</span>}
+          {p.confirmacaoEntrega && (
+            <p className="fraco">
+              Confirmação da entrega: <b>{p.confirmacaoEntrega.status === 'COMPLETA' ? 'completa' : 'incompleta'}</b>
+              {p.confirmacaoEntrega.faltando.length > 0 &&
+                ` — falta: ${p.confirmacaoEntrega.faltando.map((f) => ROTULO_REQUISITO[f]).join(', ')}`}
+            </p>
+          )}
+          {p.motivoInsucesso && <p className="fraco">Motivo do insucesso: <b>{p.motivoInsucesso}</b></p>}
           {p.cargaId && (
             <p className="fraco">
               Carga: <a href={`#/cargas/${p.cargaId}`}>ver carga</a>
@@ -68,7 +77,7 @@ export function PacotePagina({ id }: { id: string }) {
         <div className="cartao">
           <h3>Com quem está</h3>
           <p className="grande">{d.responsavel?.nome ?? <span className="fraco">No galpão (sem responsável)</span>}</p>
-          {(p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO') ? (
+          {p.estado === 'NAO_ATRIBUIDO' || (p.estado === 'ATRIBUIDO' && !p.cargaId) ? (
           <div className="linha">
             <select value={alvo} onChange={(e) => setAlvo(e.target.value)}>
               <option value="">{d.responsavel ? 'Passar para…' : 'Entregar a…'}</option>
@@ -83,7 +92,7 @@ export function PacotePagina({ id }: { id: string }) {
             </button>
           </div>
           ) : (
-            <p className="fraco">Na rua ou com desfecho: a responsabilidade só muda pelo retorno da carga.</p>
+            <p className="fraco">Em carga, na rua ou com desfecho: a responsabilidade segue a carga.</p>
           )}
         </div>
         <div className="cartao">

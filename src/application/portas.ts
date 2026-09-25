@@ -92,6 +92,7 @@ export interface RepositorioCargas {
   /** Quantas cargas já têm código começando com este prefixo (sequência do dia). */
   contarPorPrefixo(prefixo: string): number;
   criar(c: Carga): void;
+  marcarRotaIniciada(id: string, em: string, por: string): void;
   anexarEvento(e: EventoCarga): void;
   eventos(cargaId: string): EventoCarga[];
 }

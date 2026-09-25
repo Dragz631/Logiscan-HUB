@@ -6,7 +6,7 @@ import { ir, useOperador } from '../contexto';
 import { ROTULO_ESTADO, dataHora, enderecoCurto } from '../formato';
 import { Aviso, useCarregar } from './comum';
 
-export const ROTULO_SITUACAO = { EM_ROTA: 'Na rua', CONCLUIDA: 'Concluída' } as const;
+export const ROTULO_SITUACAO = { MONTADA: 'Montada (no galpão)', EM_ROTA: 'Na rua', CONCLUIDA: 'Concluída' } as const;
 
 export function Cargas() {
   const { exigir } = useOperador();
@@ -92,7 +92,7 @@ export function Cargas() {
                 ))}
               </ul>
               <button type="button" className="primario" disabled={marcados.size === 0} onClick={criar}>
-                Criar carga com {marcados.size} pacote(s)
+                Montar carga com {marcados.size} pacote(s)
               </button>
             </>
           )}
@@ -116,7 +116,7 @@ export function Cargas() {
           )}
           {retorno?.ok && (
             <Aviso tipo={retorno.recusados.length ? 'erro' : 'ok'}>
-              {retorno.aceitos} entrega(s) registrada(s), {retorno.repetidos} repetida(s) ignorada(s), {retorno.recusados.length} recusada(s).
+              {retorno.aceitos} acontecimento(s) registrado(s) (entrega/insucesso), {retorno.repetidos} repetido(s) ignorado(s), {retorno.recusados.length} recusado(s).
               {retorno.recusados.length > 0 && (
                 <ul>
                   {retorno.recusados.map((r) => (

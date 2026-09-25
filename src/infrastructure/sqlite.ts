@@ -75,6 +75,8 @@ function pacoteDaLinha(r: Linha): Pacote {
     estado: String(r.estado) as Pacote['estado'],
     responsavelId: str(r.responsavel_id),
     cargaId: str(r.carga_id),
+    confirmacaoEntrega: r.confirmacao_entrega ? parse(r.confirmacao_entrega) : null,
+    motivoInsucesso: str(r.motivo_insucesso),
     pendencias: parse(r.pendencias),
     origem: {
       loteId: String(r.origem_lote_id),
@@ -130,14 +132,15 @@ class Pacotes implements RepositorioPacotes {
       p.dados.complemento, p.dados.bairro, p.dados.cidade, p.dados.uf, p.dados.cep, p.destinoId,
       json(p.destinoCandidatos), p.estado, p.responsavelId, json(p.pendencias), p.origem.loteId,
       p.origem.arquivo, p.origem.card, p.criadoEm, p.atualizadoEm, p.versao, p.cargaId,
+      p.confirmacaoEntrega ? json(p.confirmacaoEntrega) : null, p.motivoInsucesso,
     ];
     if (versaoEsperada === null) {
       this.db
         .prepare(
           `INSERT INTO pacotes (transportadora, codigo, destinatario, rua, rua_detalhe, numero, complemento, bairro,
             cidade, uf, cep, destino_id, destino_candidatos, estado, responsavel_id, pendencias, origem_lote_id,
-            origem_arquivo, origem_card, criado_em, atualizado_em, versao, carga_id, id)
-           VALUES (${new Array(24).fill('?').join(',')})`,
+            origem_arquivo, origem_card, criado_em, atualizado_em, versao, carga_id, confirmacao_entrega, motivo_insucesso, id)
+           VALUES (${new Array(26).fill('?').join(',')})`,
         )
         .run(...valores, p.id);
       return;
@@ -146,7 +149,8 @@ class Pacotes implements RepositorioPacotes {
       .prepare(
         `UPDATE pacotes SET transportadora=?, codigo=?, destinatario=?, rua=?, rua_detalhe=?, numero=?, complemento=?,
           bairro=?, cidade=?, uf=?, cep=?, destino_id=?, destino_candidatos=?, estado=?, responsavel_id=?, pendencias=?,
-          origem_lote_id=?, origem_arquivo=?, origem_card=?, criado_em=?, atualizado_em=?, versao=?, carga_id=?
+          origem_lote_id=?, origem_arquivo=?, origem_card=?, criado_em=?, atualizado_em=?, versao=?, carga_id=?,
+          confirmacao_entrega=?, motivo_insucesso=?
          WHERE id=? AND versao=?`,
       )
       .run(...valores, p.id, versaoEsperada);
@@ -357,6 +361,8 @@ class Cargas implements RepositorioCargas {
       .map((x) => String(x.pacote_id)),
     criadaEm: String(r.criada_em),
     criadaPor: String(r.criada_por),
+    rotaIniciadaEm: str(r.rota_iniciada_em),
+    rotaIniciadaPor: str(r.rota_iniciada_por),
   });
 
   porId(id: string) {
@@ -379,6 +385,10 @@ class Cargas implements RepositorioCargas {
       .run(c.id, c.codigo, c.ajudante.id, c.ajudante.nome, c.criadaEm, c.criadaPor);
     const ins = this.db.prepare('INSERT INTO cargas_pacotes (carga_id, pacote_id, ordem) VALUES (?,?,?)');
     c.pacoteIds.forEach((p, i) => ins.run(c.id, p, i));
+  }
+
+  marcarRotaIniciada(id: string, em: string, por: string) {
+    this.db.prepare('UPDATE cargas SET rota_iniciada_em = ?, rota_iniciada_por = ? WHERE id = ? AND rota_iniciada_em IS NULL').run(em, por, id);
   }
 
   anexarEvento(e: EventoCarga) {

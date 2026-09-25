@@ -37,10 +37,11 @@ Requer Node 24+ (usa o SQLite embutido `node:sqlite`).
 ## Ponte HUB → CARGA → STREET → HUB (V0.2, dados locais)
 
 ```
-HUB: pacotes ATRIBUIDOS ao ajudante ──criar carga──▶ EM_ROTA  (evento SAIU_PARA_ROTA)
-HUB ──arquivo logiscan.carga/v0──▶ Street  (só os pacotes daquele ajudante)
-Street: entrega de teste ──▶ fila local ──arquivo logiscan.street-eventos/v0──▶ HUB
-HUB: ENTREGA_REGISTRADA na timeline do pacote ──▶ ENTREGUE
+HUB: pacotes ATRIBUIDOS ──montar carga──▶ carga MONTADA, pacotes continuam ATRIBUIDOS (INCLUIDO_EM_CARGA)
+HUB: operador clica INICIAR ROTA ──▶ carga e pacotes EM_ROTA (SAIU_PARA_ROTA), com horário próprio
+HUB ──arquivo logiscan.carga/v0──▶ Street  (só os pacotes daquele ajudante; sessão explícita do ajudante)
+Street: entrega ou insucesso ──▶ fila local ──arquivo logiscan.street-eventos/v0──▶ HUB
+HUB: ENTREGA_REGISTRADA → ENTREGUE (confirmação INCOMPLETA)  |  INSUCESSO_REGISTRADO (com motivo) → INSUCESSO
 ```
 
 - **Carga**: código legível (`C-AAAAMMDD-AJUDANTE-n`), ajudante, pacotes, quem/quando criou e histórico
@@ -51,8 +52,13 @@ HUB: ENTREGA_REGISTRADA na timeline do pacote ──▶ ENTREGUE
 - **Idempotência**: cada evento do Street tem `id_evento` determinístico; reenviar o arquivo não duplica.
   O que não pode ser aplicado (pacote fora da carga, outro ajudante, tipo desconhecido, data inválida,
   pacote já entregue) é **recusado com motivo** e fica no histórico da carga.
-- Pacote em rota não pode ser reatribuído nem entrar em outra carga.
-- Fora desta etapa: insucesso, provas/fotos, Esteira, sincronização pela rede (o mesmo documento vai viajar por ela).
+- Pacote em carga (montada ou na rua) não pode ser reatribuído nem entrar em outra carga.
+- **Entrega registrada ≠ confirmada**: `ENTREGUE` guarda `confirmacaoEntrega` (INCOMPLETA enquanto faltarem
+  provas); `PRONTO_PARA_BAIXA` só com confirmação COMPLETA (`podeFicarProntoParaBaixa`). A Esteira não existe ainda.
+- **Insucesso não vira entrega**; o motivo fica no histórico.
+- **Sem desfazer destrutivo**: `CORRECAO_REGISTRADA` reverte o último desfecho com um evento novo (sem tela ainda).
+- Ao abrir o banco, a projeção dos pacotes é recalculada a partir do histórico onde divergir (após migrações).
+- Fora desta etapa: provas/fotos, Esteira, retorno ao galpão, sincronização pela rede (o mesmo documento vai viajar por ela).
 
 ## Arquitetura
 

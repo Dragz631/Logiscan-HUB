@@ -5,7 +5,8 @@
  * Cada evento tem `id_evento` gerado no celular: reenviar o mesmo arquivo (ou o mesmo evento
  * num retry) NÃO cria dois acontecimentos no HUB.
  *
- * v0 conhece só ENTREGA_REGISTRADA. Tipos desconhecidos são RECUSADOS com motivo (não somem).
+ * v0 conhece ENTREGA_REGISTRADA e INSUCESSO_REGISTRADO (este com `motivo` obrigatório).
+ * Tipos desconhecidos são RECUSADOS com motivo (não somem).
  * Sem provas/fotos nesta versão.
  */
 import { z } from 'zod';
@@ -19,6 +20,8 @@ export const EventoStreetV0 = z.looseObject({
   hub_pacote_id: z.string().min(1),
   codigo: z.string().default(''),
   ocorrido_em: z.string().min(1),
+  /** Só INSUCESSO_REGISTRADO: por que não foi entregue. */
+  motivo: z.string().optional(),
   recebedor: z
     .object({ tipo: z.string().default(''), detalhes: z.string().default('') })
     .nullable()

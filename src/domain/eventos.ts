@@ -8,6 +8,7 @@
  * Idempotência: cada evento traz `chaveIdempotencia`. Receber o mesmo evento duas vezes
  * (ex.: retry do celular no futuro Street) não gera dois acontecimentos.
  */
+import { avaliarEntrega } from './confirmacao';
 import {
   type DadosPacote,
   type OrigemPacote,
@@ -73,7 +74,10 @@ export interface CargaRef {
   codigo: string;
 }
 
-/** O pacote foi despachado para a rua dentro de uma carga do ajudante responsável. */
+/** O pacote entrou numa carga MONTADA (continua no galpão, ATRIBUIDO). */
+export type EventoIncluidoEmCarga = Base<'INCLUIDO_EM_CARGA', { carga: CargaRef; ajudante: AjudanteRef }>;
+
+/** A rota da carga foi iniciada pelo operador: agora sim o pacote está na rua. */
 export type EventoSaiuParaRota = Base<'SAIU_PARA_ROTA', { carga: CargaRef; ajudante: AjudanteRef }>;
 
 /**
@@ -88,14 +92,35 @@ export type EventoEntregaRegistrada = Base<'ENTREGA_REGISTRADA', {
   recebedor: { tipo: string; detalhes: string } | null;
 }>;
 
+/** Tentativa sem sucesso registrada na rua. O motivo é obrigatório e fica no histórico. */
+export type EventoInsucessoRegistrado = Base<'INSUCESSO_REGISTRADO', {
+  carga: CargaRef;
+  ajudante: AjudanteRef;
+  idEventoStreet: string;
+  motivo: string;
+}>;
+
+/**
+ * Correção/reversão de um desfecho (entrega ou insucesso) — NUNCA apaga o evento corrigido:
+ * é um acontecimento novo que aponta para o antigo e devolve o pacote para EM_ROTA.
+ * (Domínio pronto; ainda sem tela.)
+ */
+export type EventoCorrecaoRegistrada = Base<'CORRECAO_REGISTRADA', {
+  eventoCorrigido: { id: string; tipo: 'ENTREGA_REGISTRADA' | 'INSUCESSO_REGISTRADO' };
+  motivo: string;
+}>;
+
 export type Evento =
   | EventoImportado
   | EventoConflitoResolvido
   | EventoDestinoConfirmado
   | EventoAtribuido
   | EventoReatribuido
+  | EventoIncluidoEmCarga
   | EventoSaiuParaRota
-  | EventoEntregaRegistrada;
+  | EventoEntregaRegistrada
+  | EventoInsucessoRegistrado
+  | EventoCorrecaoRegistrada;
 
 export type TipoEvento = Evento['tipo'];
 
@@ -104,7 +129,6 @@ export type TipoEvento = Evento['tipo'];
  * Declarados para a arquitetura já conhecê-los; o domínio RECUSA enquanto não forem implementados.
  */
 export const TIPOS_FUTUROS = [
-  'INSUCESSO_REGISTRADO',
   'PROVA_RECEBIDA',
   'RETORNADO_AO_GALPAO',
   'PRONTO_PARA_BAIXA',
@@ -140,6 +164,8 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
       estado: 'NAO_ATRIBUIDO',
       responsavelId: null,
       cargaId: null,
+      confirmacaoEntrega: null,
+      motivoInsucesso: null,
       pendencias: pendenciasDestino(d.destinoId, d.destinoCandidatos),
       origem: d.origem,
       criadoEm: e.ocorridoEm,
@@ -185,29 +211,73 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
         throw new ErroDominio('RESPONSAVEL_DIVERGENTE', 'o responsável atual não é o informado como anterior');
       }
       if (e.dados.de.id === e.dados.para.id) throw new ErroDominio('MESMO_RESPONSAVEL', 'o pacote já está com esse ajudante');
+      if (atual.cargaId !== null && atual.estado === 'ATRIBUIDO') {
+        throw new ErroDominio('NA_CARGA', 'o pacote está numa carga montada: não pode ser passado a outro ajudante');
+      }
       if (!podeTransitar(atual.estado, 'ATRIBUIDO')) {
         throw new ErroDominio('TRANSICAO_INVALIDA', `não é possível reatribuir um pacote em ${atual.estado}`);
       }
       return { ...base, estado: 'ATRIBUIDO', responsavelId: e.dados.para.id };
+    case 'INCLUIDO_EM_CARGA':
+      if (atual.responsavelId !== e.dados.ajudante.id) {
+        throw new ErroDominio('NAO_E_DO_AJUDANTE', `o pacote não está com ${e.dados.ajudante.nome}`);
+      }
+      if (atual.estado !== 'ATRIBUIDO' || atual.cargaId !== null) {
+        throw new ErroDominio('FORA_DO_GALPAO', `pacote em ${atual.estado}${atual.cargaId ? ' e já em carga' : ''} não pode entrar em carga`);
+      }
+      return { ...base, cargaId: e.dados.carga.id };
     case 'SAIU_PARA_ROTA':
       if (atual.responsavelId !== e.dados.ajudante.id) {
         throw new ErroDominio('NAO_E_DO_AJUDANTE', `o pacote não está com ${e.dados.ajudante.nome}`);
+      }
+      // cargaId null: histórico da V0.2, quando a saída acontecia junto com a criação da carga.
+      if (atual.cargaId !== null && atual.cargaId !== e.dados.carga.id) {
+        throw new ErroDominio('FORA_DA_CARGA', `o pacote não está na carga ${e.dados.carga.codigo}`);
       }
       if (!podeTransitar(atual.estado, 'EM_ROTA')) {
         throw new ErroDominio('TRANSICAO_INVALIDA', `pacote em ${atual.estado} não pode sair para rota`);
       }
       return { ...base, estado: 'EM_ROTA', cargaId: e.dados.carga.id };
     case 'ENTREGA_REGISTRADA':
+    case 'INSUCESSO_REGISTRADO': {
       if (atual.cargaId !== e.dados.carga.id) {
         throw new ErroDominio('FORA_DA_CARGA', `o pacote não está na carga ${e.dados.carga.codigo}`);
       }
       if (atual.responsavelId !== e.dados.ajudante.id) {
         throw new ErroDominio('NAO_E_DO_AJUDANTE', `o pacote não está com ${e.dados.ajudante.nome}`);
       }
-      if (!podeTransitar(atual.estado, 'ENTREGUE')) {
-        throw new ErroDominio('TRANSICAO_INVALIDA', `pacote em ${atual.estado} não pode ser dado como entregue`);
+      if (atual.estado === 'ATRIBUIDO') {
+        throw new ErroDominio('ROTA_NAO_INICIADA', `a rota da carga ${e.dados.carga.codigo} ainda não foi iniciada`);
       }
-      return { ...base, estado: 'ENTREGUE' };
+      if (e.tipo === 'ENTREGA_REGISTRADA' && atual.estado === 'INSUCESSO') {
+        throw new ErroDominio('INSUCESSO_NAO_VIRA_ENTREGA', 'o pacote tem insucesso registrado: insucesso não vira entrega');
+      }
+      if (atual.estado !== 'EM_ROTA') {
+        throw new ErroDominio('TRANSICAO_INVALIDA', `pacote em ${atual.estado} já teve desfecho nesta rota`);
+      }
+      if (e.tipo === 'INSUCESSO_REGISTRADO') {
+        if (!e.dados.motivo.trim()) throw new ErroDominio('SEM_MOTIVO', 'insucesso precisa de motivo');
+        return { ...base, estado: 'INSUCESSO', motivoInsucesso: e.dados.motivo.trim(), confirmacaoEntrega: null };
+      }
+      return {
+        ...base,
+        estado: 'ENTREGUE',
+        motivoInsucesso: null,
+        confirmacaoEntrega: avaliarEntrega({
+          recebedor: e.dados.recebedor,
+          ocorridoEm: e.ocorridoEm,
+          provas: { fotoPacote: false, fotoLocal: false },
+        }),
+      };
+    }
+    case 'CORRECAO_REGISTRADA': {
+      const alvo = e.dados.eventoCorrigido.tipo === 'ENTREGA_REGISTRADA' ? 'ENTREGUE' : 'INSUCESSO';
+      if (atual.estado !== alvo) {
+        throw new ErroDominio('NADA_A_CORRIGIR', `o pacote não está em ${alvo}: não há desfecho desse tipo para corrigir`);
+      }
+      if (!e.dados.motivo.trim()) throw new ErroDominio('SEM_MOTIVO', 'correção precisa de motivo');
+      return { ...base, estado: 'EM_ROTA', confirmacaoEntrega: null, motivoInsucesso: null };
+    }
   }
 }
 
@@ -234,6 +304,8 @@ export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string)
       return `Entregue ao ajudante ${e.dados.ajudante.nome} (responsabilidade transferida)`;
     case 'REATRIBUIDO':
       return `Reatribuído: ${e.dados.de.nome} → ${e.dados.para.nome} (responsabilidade transferida)`;
+    case 'INCLUIDO_EM_CARGA':
+      return `Incluído na carga ${e.dados.carga.codigo} de ${e.dados.ajudante.nome} (carga montada)`;
     case 'SAIU_PARA_ROTA':
       return `Saiu para rota com ${e.dados.ajudante.nome} na carga ${e.dados.carga.codigo}`;
     case 'ENTREGA_REGISTRADA': {
@@ -241,5 +313,9 @@ export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string)
       const quem = r && r.detalhes ? ` — recebido por ${r.detalhes}${r.tipo ? ` (${r.tipo.replace(/_/g, ' ')})` : ''}` : '';
       return `Entrega registrada no Street por ${e.dados.ajudante.nome}${quem}`;
     }
+    case 'INSUCESSO_REGISTRADO':
+      return `Insucesso registrado no Street por ${e.dados.ajudante.nome} — motivo: ${e.dados.motivo}`;
+    case 'CORRECAO_REGISTRADA':
+      return `Correção: ${e.dados.eventoCorrigido.tipo === 'ENTREGA_REGISTRADA' ? 'entrega' : 'insucesso'} anterior revertido (o registro original continua no histórico) — motivo: ${e.dados.motivo}`;
   }
 }

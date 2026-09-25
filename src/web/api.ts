@@ -47,6 +47,8 @@ export const api = {
   carga: (id: string) => chamar<DetalheCarga>(`/cargas/${id}`),
   criarCarga: (ajudanteId: string, pacoteIds: string[], ator: string) =>
     chamar<{ id: string; codigo: string }>('/cargas', { body: { ajudanteId, pacoteIds, ator } }),
+  iniciarRota: (id: string, ator: string) =>
+    chamar<{ jaIniciada: boolean; rotaIniciadaEm: string }>(`/cargas/${id}/iniciar-rota`, { body: { ator } }),
   exportarCarga: (id: string, ator: string) =>
     chamar<{ arquivo: string; documento: DocumentoCargaV0 }>(`/cargas/${id}/exportar`, { body: { ator } }),
   receberRetorno: (arquivo: string, conteudo: string) =>
