@@ -4,15 +4,21 @@
  */
 import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
+import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
 import type { Evento } from '../domain/eventos';
 import type { DecisaoConflito, ItemPrevia } from '../domain/importacao';
 import type { EstadoPacote, Pacote } from '../domain/pacote';
 
+/** Perfil operacional do ajudante. É o perfil — não o aparelho — que recebe cargas. */
 export interface Ajudante {
   id: string;
   nome: string;
   ativo: boolean;
   criadoEm: string;
+  /** Ex.: "Moto", "Bicicleta", "A pé". Livre, informativo. */
+  veiculo: string | null;
+  /** Pacotes que costuma levar numa saída. Só gera AVISO de excesso, nunca bloqueia. */
+  capacidade: number | null;
 }
 
 export type StatusLote = 'PREVIA' | 'CONFIRMADO' | 'DESCARTADO';
@@ -84,6 +90,7 @@ export interface RepositorioAjudantes {
   porId(id: string): Ajudante | undefined;
   listar(): Ajudante[];
   criar(a: Ajudante): void;
+  atualizar(a: Ajudante): void;
 }
 
 export interface RepositorioCargas {
@@ -93,8 +100,28 @@ export interface RepositorioCargas {
   contarPorPrefixo(prefixo: string): number;
   criar(c: Carga): void;
   marcarRotaIniciada(id: string, em: string, por: string): void;
+  marcarFinalizada(id: string, em: string, por: string): void;
+  /** Carga ainda não finalizada do ajudante (no máximo uma). */
+  ativaDoAjudante(ajudanteId: string): Carga | undefined;
+  /** Ids das cargas não finalizadas. */
+  idsAtivas(): Set<string>;
+  adicionarPacotes(cargaId: string, pacoteIds: string[]): void;
+  removerPacotes(cargaId: string, pacoteIds: string[]): void;
   anexarEvento(e: EventoCarga): void;
   eventos(cargaId: string): EventoCarga[];
+}
+
+/** Memória operacional do HUB: regiões e o mapa rua → região. */
+export interface RepositorioRegioes {
+  listar(): Regiao[];
+  porId(id: string): Regiao | undefined;
+  porNome(nome: string): Regiao | undefined;
+  criar(r: Regiao): void;
+  associacoes(): Map<string, Associacao>;
+  associacao(ruaChave: string): Associacao | undefined;
+  definir(a: Associacao): void;
+  anexarEvento(e: EventoRegiao): void;
+  eventos(ruaChave: string): EventoRegiao[];
 }
 
 /** Tudo que precisa ser gravado junto, numa transação. */
@@ -105,6 +132,7 @@ export interface Armazem {
   lotes: RepositorioLotes;
   ajudantes: RepositorioAjudantes;
   cargas: RepositorioCargas;
+  regioes: RepositorioRegioes;
   transacao<T>(fn: () => T): T;
 }
 

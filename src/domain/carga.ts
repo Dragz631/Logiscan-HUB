@@ -7,7 +7,9 @@
  * Situação da carga:
  *   MONTADA   → criada, pacotes separados para o ajudante, ainda no galpão (ATRIBUIDOS);
  *   EM_ROTA   → o operador INICIOU A ROTA (ação explícita, com horário próprio);
- *   CONCLUIDA → rota iniciada e todos os pacotes com desfecho (entregue ou insucesso).
+ *   CONCLUIDA → rota iniciada e todos os pacotes com desfecho (entregue ou insucesso) — derivado;
+ *   FINALIZADA→ o operador FINALIZOU a rota (ação explícita). Só aí a carga deixa de ser ativa.
+ * Um ajudante tem no máximo UMA carga ativa (não finalizada); um pacote, no máximo uma carga ativa.
  * Criar a carga NUNCA é evidência de que o ajudante saiu para a rua.
  */
 import type { AjudanteRef } from './eventos';
@@ -24,6 +26,14 @@ export interface Carga {
   /** Quando/quem iniciou a rota. null = carga só montada. */
   rotaIniciadaEm: string | null;
   rotaIniciadaPor: string | null;
+  finalizadaEm: string | null;
+  finalizadaPor: string | null;
+}
+
+export interface RuaRef {
+  chave: string;
+  nome: string;
+  quantidade: number;
 }
 
 interface BaseEventoCarga<T extends string, D> {
@@ -38,7 +48,11 @@ interface BaseEventoCarga<T extends string, D> {
 
 export type EventoCarga =
   | BaseEventoCarga<'CARGA_CRIADA', { ajudante: AjudanteRef; quantidade: number }>
+  | BaseEventoCarga<'RUAS_ADICIONADAS', { ruas: RuaRef[]; chave?: string }>
+  | BaseEventoCarga<'RUA_REMOVIDA', { rua: RuaRef; motivo: 'removida' | 'reatribuida'; para?: AjudanteRef }>
   | BaseEventoCarga<'ROTA_INICIADA', { quantidade: number }>
+  | BaseEventoCarga<'ROTA_FINALIZADA', { entregues: number; insucessos: number }>
+  | BaseEventoCarga<'RECEBIDA_NO_STREET', { ajudante: AjudanteRef; quantidade: number }>
   | BaseEventoCarga<'CARGA_EXPORTADA', { arquivo: string }>
   | BaseEventoCarga<'RETORNO_RECEBIDO', {
       arquivo: string;
@@ -47,11 +61,14 @@ export type EventoCarga =
       recusados: { idEventoStreet: string; codigo: string; motivo: string }[];
     }>;
 
-export type SituacaoCarga = 'MONTADA' | 'EM_ROTA' | 'CONCLUIDA';
+export type SituacaoCarga = 'MONTADA' | 'EM_ROTA' | 'CONCLUIDA' | 'FINALIZADA';
 
 const DESFECHO: EstadoPacote[] = ['ENTREGUE', 'INSUCESSO', 'RETORNADO', 'PRONTO_PARA_BAIXA', 'BAIXADO'];
 
-export function situacaoCarga(rotaIniciadaEm: string | null, estados: EstadoPacote[]): SituacaoCarga {
+export const ESTADOS_DESFECHO = DESFECHO;
+
+export function situacaoCarga(rotaIniciadaEm: string | null, estados: EstadoPacote[], finalizadaEm: string | null = null): SituacaoCarga {
+  if (finalizadaEm) return 'FINALIZADA';
   if (!rotaIniciadaEm) return 'MONTADA';
   return estados.length > 0 && estados.every((e) => DESFECHO.includes(e)) ? 'CONCLUIDA' : 'EM_ROTA';
 }
@@ -78,6 +95,16 @@ export function descreverEventoCarga(e: EventoCarga): string {
   switch (e.tipo) {
     case 'CARGA_CRIADA':
       return `Carga montada para ${e.dados.ajudante.nome} com ${e.dados.quantidade} pacote(s)`;
+    case 'RUAS_ADICIONADAS':
+      return `Rua(s) atribuída(s): ${e.dados.ruas.map((r) => `${r.nome} (${r.quantidade})`).join(', ')}`;
+    case 'RUA_REMOVIDA':
+      return e.dados.motivo === 'reatribuida'
+        ? `${e.dados.rua.nome} (${e.dados.rua.quantidade}) reatribuída para ${e.dados.para?.nome}`
+        : `${e.dados.rua.nome} (${e.dados.rua.quantidade}) removida da carga — pacotes voltaram ao galpão`;
+    case 'ROTA_FINALIZADA':
+      return `Rota finalizada: ${e.dados.entregues} entregue(s), ${e.dados.insucessos} insucesso(s)`;
+    case 'RECEBIDA_NO_STREET':
+      return `Carga recebida no Street pelo perfil de ${e.dados.ajudante.nome} (${e.dados.quantidade} pacote(s))`;
     case 'ROTA_INICIADA':
       return `Rota iniciada: ${e.dados.quantidade} pacote(s) saíram para a rua`;
     case 'CARGA_EXPORTADA':

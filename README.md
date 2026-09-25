@@ -60,6 +60,23 @@ HUB: ENTREGA_REGISTRADA → ENTREGUE (confirmação INCOMPLETA)  |  INSUCESSO_RE
 - Ao abrir o banco, a projeção dos pacotes é recalculada a partir do histórico onde divergir (após migrações).
 - Fora desta etapa: provas/fotos, Esteira, retorno ao galpão, sincronização pela rede (o mesmo documento vai viajar por ela).
 
+## V0.2 — Orquestração operacional (HUB organiza, atribui e monitora; o Street executa)
+
+- **Rua = unidade de repasse.** Ruas são derivadas dos pacotes (`src/domain/ruas.ts`), com estado derivado
+  (Disponível / Atribuída / Em rota / Concluída). Atribuir uma rua leva a rua INTEIRA.
+- **Orquestrador** (`#/`): selecionar rua(s) → escolher ajudante → Atribuir. Sem arrastar-e-soltar.
+  Barra de capacidade com projeção; excesso só avisa.
+- **Perfis** (`#/ajudantes`): nome, veículo, capacidade, ativo; página do perfil com carga atual, ruas,
+  progresso, ocorrências; iniciar/finalizar rota; remover/reatribuir rua antes de iniciar.
+- **Regras**: uma rua não fica com dois ajudantes; um pacote em no máximo uma carga ativa; um perfil com no
+  máximo uma carga ativa; carga em rota não ganha nem perde ruas; toda mudança gera evento.
+- **Regiões** (`src/domain/regioes.ts`, migração 005): mapa operacional rua → região como DADO aprendido.
+  Rua nova → "região a definir"; a decisão (inclusive "sem região") é lembrada. Mudar a região de uma rua
+  conhecida é conflito: só com confirmação, e fica no histórico (`eventos_regiao`). Região não mexe em destino.
+- **Transporte HUB ↔ Street** (`src/application/transporteStreet.ts`, rotas `/api/street/*`): a carga vai
+  para o PERFIL (helper_id), não para um aparelho. Mesmos contratos do arquivo, que continua como fallback.
+  Sem autenticação (rede local); CORS só para origens locais.
+
 ## Arquitetura
 
 ```

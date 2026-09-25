@@ -15,6 +15,7 @@ import { ErroDominio } from '../domain/eventos';
 import type { EstadoPacote, Pacote } from '../domain/pacote';
 import { ErroAplicacao } from './erros';
 import type { Contexto } from './portas';
+import { type RuaDoPerfil, ruasDaCarga } from './orquestracao';
 import { registrarEvento } from './registrarEvento';
 
 /** Pacotes que podem entrar numa carga nova do ajudante: com ele, no galpão e fora de outra carga. */
@@ -29,6 +30,10 @@ export function criarCarga(ctx: Contexto, entrada: { ajudanteId: string; pacoteI
   return armazem.transacao(() => {
     const ajudante = armazem.ajudantes.porId(entrada.ajudanteId);
     if (!ajudante) throw new ErroAplicacao('AJUDANTE_INEXISTENTE', 'ajudante não encontrado', 404);
+    const ativa = armazem.cargas.ativaDoAjudante(ajudante.id);
+    if (ativa) {
+      throw new ErroAplicacao('JA_TEM_CARGA_ATIVA', `${ajudante.nome} já tem a carga ${ativa.codigo} ativa: um perfil não mistura duas cargas`, 409);
+    }
     const agora = ctx.relogio.agora();
     const prefixo = prefixoCarga(agora, ajudante.nome);
     const carga: Carga = {
@@ -40,6 +45,8 @@ export function criarCarga(ctx: Contexto, entrada: { ajudanteId: string; pacoteI
       criadaPor: entrada.ator,
       rotaIniciadaEm: null,
       rotaIniciadaPor: null,
+      finalizadaEm: null,
+      finalizadaPor: null,
     };
     // Valida TODOS antes de gravar qualquer coisa: carga é tudo ou nada.
     for (const id of ids) {
@@ -135,9 +142,6 @@ export function exportarCarga(ctx: Contexto, cargaId: string, ator: string): { a
     const carga = armazem.cargas.porId(cargaId);
     if (!carga) throw new ErroAplicacao('CARGA_INEXISTENTE', 'carga não encontrada', 404);
     const agora = ctx.relogio.agora();
-    const pacotes = carga.pacoteIds
-      .map((id) => armazem.pacotes.porId(id))
-      .filter((p): p is Pacote => !!p && p.cargaId === carga.id && (p.estado === 'EM_ROTA' || p.estado === 'ATRIBUIDO'));
     const arquivo = `carga-${carga.codigo}.json`;
     armazem.cargas.anexarEvento({
       id: ctx.ids.novo(),
@@ -148,12 +152,29 @@ export function exportarCarga(ctx: Contexto, cargaId: string, ator: string): { a
       ocorridoEm: agora,
       registradoEm: agora,
     });
-    return {
-      arquivo,
-      documento: {
+    return { arquivo, documento: documentoDaCarga(ctx, carga, agora) };
+  });
+}
+
+/**
+ * Documento `logiscan.carga/v0` da carga: SÓ os pacotes dela, do ajudante dono dela, ainda sem desfecho.
+ * Usado pelo arquivo (fallback/diagnóstico) e pelo transporte direto HUB → Street.
+ */
+export function documentoDaCarga(ctx: Contexto, carga: Carga, agora: string): DocumentoCargaV0 {
+  const pacotes = carga.pacoteIds
+    .map((id) => ctx.armazem.pacotes.porId(id))
+    .filter((p): p is Pacote => !!p && p.cargaId === carga.id && (p.estado === 'EM_ROTA' || p.estado === 'ATRIBUIDO'));
+  return {
         schema: SCHEMA_CARGA_V0,
         gerado_em: agora,
-        carga: { id: carga.id, codigo: carga.codigo, criada_em: carga.criadaEm, criada_por: carga.criadaPor },
+        carga: {
+          id: carga.id,
+          codigo: carga.codigo,
+          criada_em: carga.criadaEm,
+          criada_por: carga.criadaPor,
+          situacao: carga.rotaIniciadaEm ? 'EM_ROTA' : 'MONTADA',
+          rota_iniciada_em: carga.rotaIniciadaEm,
+        },
         ajudante: carga.ajudante,
         pacotes: pacotes.map((p) => ({
           hub_pacote_id: p.id,
@@ -170,9 +191,7 @@ export function exportarCarga(ctx: Contexto, cargaId: string, ator: string): { a
           cep: p.dados.cep,
           destino_id: p.destinoId,
         })),
-      },
-    };
-  });
+  };
 }
 
 export interface ResultadoRetorno {
@@ -286,7 +305,10 @@ export interface ResumoCarga {
   criadaPor: string;
   rotaIniciadaEm: string | null;
   rotaIniciadaPor: string | null;
+  finalizadaEm: string | null;
+  finalizadaPor: string | null;
   situacao: SituacaoCarga;
+  ruas: RuaDoPerfil[];
   total: number;
   porEstado: Partial<Record<EstadoPacote, number>>;
 }
@@ -303,7 +325,10 @@ function resumir(ctx: Contexto, c: Carga): ResumoCarga & { pacotes: Pacote[] } {
     criadaPor: c.criadaPor,
     rotaIniciadaEm: c.rotaIniciadaEm,
     rotaIniciadaPor: c.rotaIniciadaPor,
-    situacao: situacaoCarga(c.rotaIniciadaEm, pacotes.map((p) => p.estado)),
+    finalizadaEm: c.finalizadaEm,
+    finalizadaPor: c.finalizadaPor,
+    situacao: situacaoCarga(c.rotaIniciadaEm, pacotes.map((p) => p.estado), c.finalizadaEm),
+    ruas: ruasDaCarga(pacotes),
     total: pacotes.length,
     porEstado,
     pacotes,

@@ -8,6 +8,8 @@ import { Cargas } from './paginas/Cargas';
 import { Importar } from './paginas/Importar';
 import { Inventario } from './paginas/Inventario';
 import { LotePagina } from './paginas/Lote';
+import { Orquestrador } from './paginas/Orquestrador';
+import { PerfilPagina } from './paginas/Perfil';
 import { PacotePagina } from './paginas/Pacote';
 
 const CHAVE_OPERADOR = 'hub.operador';
@@ -32,7 +34,7 @@ function App() {
   };
   const exigir = () => {
     if (operador.trim()) return operador.trim();
-    alert('Informe quem está operando (canto superior direito) antes de registrar ações.');
+    alert('Informe quem está operando (campo "Operador", no menu) antes de registrar ações.');
     return null;
   };
 
@@ -41,30 +43,38 @@ function App() {
   if (pagina === 'importar') conteudo = <Importar />;
   else if (pagina === 'importacoes' && id) conteudo = <LotePagina id={id} />;
   else if (pagina === 'pacotes' && id) conteudo = <PacotePagina id={id} />;
+  else if (pagina === 'ajudantes' && id) conteudo = <PerfilPagina id={id} />;
   else if (pagina === 'ajudantes') conteudo = <Ajudantes />;
+  else if (pagina === 'inventario') conteudo = <Inventario />;
   else if (pagina === 'cargas' && id) conteudo = <CargaPagina id={id} />;
   else if (pagina === 'cargas') conteudo = <Cargas />;
-  else conteudo = <Inventario />;
+  else conteudo = <Orquestrador />;
 
   const ativo = (p: string) => ((pagina ?? '') === p ? 'ativo' : '');
   return (
     <OperadorCtx.Provider value={{ operador, exigir }}>
-      <header className="topo">
-        <div className="marca">
-          LOGISCAN <b>HUB</b>
-        </div>
-        <nav>
-          <a href="#/" className={ativo('')}>Inventário</a>
-          <a href="#/importar" className={ativo('importar') || ativo('importacoes')}>Importar</a>
-          <a href="#/cargas" className={ativo('cargas')}>Cargas</a>
-          <a href="#/ajudantes" className={ativo('ajudantes')}>Ajudantes</a>
-        </nav>
-        <label className="operador">
-          Operador
-          <input value={operador} onChange={(e) => salvar(e.target.value)} placeholder="seu nome" />
-        </label>
-      </header>
-      <main>{conteudo}</main>
+      <div className="app">
+        <aside className="lateral">
+          <div className="marca">
+            LOGISCAN <b>HUB</b>
+            <small>orquestração</small>
+          </div>
+          <nav>
+            <span className="secao">Operação</span>
+            <a href="#/" className={ativo('')}>Orquestrador de ruas</a>
+            <a href="#/cargas" className={ativo('cargas')}>Cargas</a>
+            <a href="#/ajudantes" className={ativo('ajudantes')}>Ajudantes</a>
+            <span className="secao">Pacotes</span>
+            <a href="#/importar" className={ativo('importar') || ativo('importacoes')}>Importar</a>
+            <a href="#/inventario" className={ativo('inventario') || ativo('pacotes')}>Inventário</a>
+          </nav>
+          <label className="operador">
+            Operador
+            <input value={operador} onChange={(e) => salvar(e.target.value)} placeholder="seu nome" />
+          </label>
+        </aside>
+        <main>{conteudo}</main>
+      </div>
     </OperadorCtx.Provider>
   );
 }

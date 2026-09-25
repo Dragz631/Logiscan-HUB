@@ -34,6 +34,9 @@ export const DocumentoCargaV0 = z.object({
     codigo: z.string().min(1),
     criada_em: z.string(),
     criada_por: z.string(),
+    /** Opcional (acrescentado sem quebrar v0): MONTADA = ainda no galpão; EM_ROTA = rota iniciada no HUB. */
+    situacao: z.enum(['MONTADA', 'EM_ROTA']).optional(),
+    rota_iniciada_em: z.string().nullable().optional(),
   }),
   ajudante: z.object({ id: z.string().min(1), nome: z.string().min(1) }),
   pacotes: z.array(PacoteCargaV0),

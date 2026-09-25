@@ -13,6 +13,7 @@ import type {
   Lote,
   RepositorioAjudantes,
   RepositorioCargas,
+  RepositorioRegioes,
   RepositorioDestinos,
   RepositorioEventos,
   RepositorioLotes,
@@ -21,6 +22,7 @@ import type {
 } from '../application/portas';
 import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
+import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
 import { chaveTexto } from '../domain/destino/texto';
 import type { Evento } from '../domain/eventos';
 import type { Pacote } from '../domain/pacote';
@@ -332,6 +334,8 @@ class Ajudantes implements RepositorioAjudantes {
     nome: String(r.nome),
     ativo: Number(r.ativo) === 1,
     criadoEm: String(r.criado_em),
+    veiculo: str(r.veiculo),
+    capacidade: r.capacidade === null || r.capacidade === undefined ? null : Number(r.capacidade),
   });
 
   porId(id: string) {
@@ -344,7 +348,15 @@ class Ajudantes implements RepositorioAjudantes {
   }
 
   criar(a: Ajudante) {
-    this.db.prepare('INSERT INTO ajudantes (id, nome, ativo, criado_em) VALUES (?,?,?,?)').run(a.id, a.nome, a.ativo ? 1 : 0, a.criadoEm);
+    this.db
+      .prepare('INSERT INTO ajudantes (id, nome, ativo, criado_em, veiculo, capacidade) VALUES (?,?,?,?,?,?)')
+      .run(a.id, a.nome, a.ativo ? 1 : 0, a.criadoEm, a.veiculo, a.capacidade);
+  }
+
+  atualizar(a: Ajudante) {
+    this.db
+      .prepare('UPDATE ajudantes SET nome = ?, ativo = ?, veiculo = ?, capacidade = ? WHERE id = ?')
+      .run(a.nome, a.ativo ? 1 : 0, a.veiculo, a.capacidade, a.id);
   }
 }
 
@@ -363,6 +375,8 @@ class Cargas implements RepositorioCargas {
     criadaPor: String(r.criada_por),
     rotaIniciadaEm: str(r.rota_iniciada_em),
     rotaIniciadaPor: str(r.rota_iniciada_por),
+    finalizadaEm: str(r.finalizada_em),
+    finalizadaPor: str(r.finalizada_por),
   });
 
   porId(id: string) {
@@ -391,6 +405,34 @@ class Cargas implements RepositorioCargas {
     this.db.prepare('UPDATE cargas SET rota_iniciada_em = ?, rota_iniciada_por = ? WHERE id = ? AND rota_iniciada_em IS NULL').run(em, por, id);
   }
 
+  marcarFinalizada(id: string, em: string, por: string) {
+    this.db.prepare('UPDATE cargas SET finalizada_em = ?, finalizada_por = ? WHERE id = ? AND finalizada_em IS NULL').run(em, por, id);
+  }
+
+  ativaDoAjudante(ajudanteId: string) {
+    const r = this.db
+      .prepare('SELECT * FROM cargas WHERE ajudante_id = ? AND finalizada_em IS NULL ORDER BY criada_em DESC LIMIT 1')
+      .get(ajudanteId);
+    return r ? this.montar(r) : undefined;
+  }
+
+  idsAtivas() {
+    return new Set(this.db.prepare('SELECT id FROM cargas WHERE finalizada_em IS NULL').all().map((r) => String(r.id)));
+  }
+
+  adicionarPacotes(cargaId: string, pacoteIds: string[]) {
+    const r = this.db.prepare('SELECT COALESCE(MAX(ordem), -1) AS m FROM cargas_pacotes WHERE carga_id = ?').get(cargaId);
+    let ordem = Number(r?.m ?? -1) + 1;
+    const ins = this.db.prepare('INSERT OR IGNORE INTO cargas_pacotes (carga_id, pacote_id, ordem) VALUES (?,?,?)');
+    for (const p of pacoteIds) ins.run(cargaId, p, ordem++);
+  }
+
+  /** Composição atual da carga (o histórico da mudança fica nos eventos RUA_REMOVIDA/RETIRADO_DA_CARGA). */
+  removerPacotes(cargaId: string, pacoteIds: string[]) {
+    const del = this.db.prepare('DELETE FROM cargas_pacotes WHERE carga_id = ? AND pacote_id = ?');
+    for (const p of pacoteIds) del.run(cargaId, p);
+  }
+
   anexarEvento(e: EventoCarga) {
     this.db
       .prepare('INSERT INTO eventos_carga (id, carga_id, tipo, dados, ator, ocorrido_em, registrado_em) VALUES (?,?,?,?,?,?,?)')
@@ -416,6 +458,63 @@ class Cargas implements RepositorioCargas {
   }
 }
 
+class Regioes implements RepositorioRegioes {
+  constructor(private db: DatabaseSync) {}
+
+  private regiao = (r: Linha): Regiao => ({
+    id: String(r.id), nome: String(r.nome), criadaEm: String(r.criada_em), criadaPor: String(r.criada_por),
+  });
+  private assoc = (r: Linha): Associacao => ({
+    ruaChave: String(r.rua_chave), ruaNome: String(r.rua_nome), regiaoId: str(r.regiao_id),
+    definidaEm: String(r.definida_em), definidaPor: String(r.definida_por),
+  });
+
+  listar() {
+    return this.db.prepare('SELECT * FROM regioes ORDER BY nome COLLATE NOCASE').all().map(this.regiao);
+  }
+  porId(id: string) {
+    const r = this.db.prepare('SELECT * FROM regioes WHERE id = ?').get(id);
+    return r ? this.regiao(r) : undefined;
+  }
+  porNome(nome: string) {
+    const r = this.db.prepare('SELECT * FROM regioes WHERE nome = ? COLLATE NOCASE').get(nome);
+    return r ? this.regiao(r) : undefined;
+  }
+  criar(r: Regiao) {
+    this.db.prepare('INSERT INTO regioes (id, nome, criada_em, criada_por) VALUES (?,?,?,?)').run(r.id, r.nome, r.criadaEm, r.criadaPor);
+  }
+  associacoes() {
+    return new Map(this.db.prepare('SELECT * FROM regioes_ruas').all().map((r) => [String(r.rua_chave), this.assoc(r)] as const));
+  }
+  associacao(ruaChave: string) {
+    const r = this.db.prepare('SELECT * FROM regioes_ruas WHERE rua_chave = ?').get(ruaChave);
+    return r ? this.assoc(r) : undefined;
+  }
+  definir(a: Associacao) {
+    this.db
+      .prepare(
+        `INSERT INTO regioes_ruas (rua_chave, rua_nome, regiao_id, definida_em, definida_por) VALUES (?,?,?,?,?)
+         ON CONFLICT (rua_chave) DO UPDATE SET rua_nome=excluded.rua_nome, regiao_id=excluded.regiao_id,
+           definida_em=excluded.definida_em, definida_por=excluded.definida_por`,
+      )
+      .run(a.ruaChave, a.ruaNome, a.regiaoId, a.definidaEm, a.definidaPor);
+  }
+  anexarEvento(e: EventoRegiao) {
+    this.db
+      .prepare('INSERT INTO eventos_regiao (id, rua_chave, tipo, dados, ator, ocorrido_em) VALUES (?,?,?,?,?,?)')
+      .run(e.id, e.ruaChave, e.tipo, json(e.dados), e.ator, e.ocorridoEm);
+  }
+  eventos(ruaChave: string) {
+    return this.db
+      .prepare('SELECT * FROM eventos_regiao WHERE rua_chave = ? ORDER BY seq')
+      .all(ruaChave)
+      .map((r) => ({
+        id: String(r.id), ruaChave: String(r.rua_chave), tipo: 'REGIAO_DEFINIDA' as const,
+        dados: parse(r.dados), ator: String(r.ator), ocorridoEm: String(r.ocorrido_em),
+      }) as EventoRegiao);
+  }
+}
+
 export function criarArmazemSqlite(db: DatabaseSync): Armazem {
   let profundidade = 0;
   return {
@@ -425,6 +524,7 @@ export function criarArmazemSqlite(db: DatabaseSync): Armazem {
     lotes: new Lotes(db),
     ajudantes: new Ajudantes(db),
     cargas: new Cargas(db),
+    regioes: new Regioes(db),
     transacao<T>(fn: () => T): T {
       if (profundidade > 0) return fn(); // já dentro de uma transação
       db.exec('BEGIN IMMEDIATE');

@@ -23,7 +23,19 @@ import {
   prepararImportacao,
   verLote,
 } from '../application/importacao';
-import { cadastrarAjudante, confirmarDestino, entregarAoAjudante, listarAjudantes } from '../application/operacao';
+import { confirmarDestino, entregarAoAjudante, listarAjudantes } from '../application/operacao';
+import {
+  atribuirRuas,
+  criarPerfil,
+  detalharPerfil,
+  editarPerfil,
+  finalizarRota,
+  listarPerfis,
+  listarRuas,
+  removerRuaDaCarga,
+} from '../application/orquestracao';
+import { criarRegiao, definirRegiao, listarRegioes } from '../application/regioes';
+import { criarRotasStreet } from './street';
 import type { Contexto } from '../application/portas';
 import { ErroDominio } from '../domain/eventos';
 import { ESTADOS } from '../domain/pacote';
@@ -38,6 +50,16 @@ const Esquemas = {
   entregar: z.object({ pacoteIds: z.array(z.string()).min(1), ajudanteId: z.string(), ator, chave: z.string().min(1) }),
   destino: z.object({ destinoId: z.string().nullable(), ator, chave: z.string().min(1) }),
   carga: z.object({ ajudanteId: z.string().min(1), pacoteIds: z.array(z.string()).min(1), ator }),
+  perfil: z.object({
+    nome: z.string(),
+    veiculo: z.string().nullable().optional(),
+    capacidade: z.number().int().positive().nullable().optional(),
+    ativo: z.boolean().optional(),
+  }),
+  atribuir: z.object({ ajudanteId: z.string().min(1), ruas: z.array(z.string()).min(1), ator, chave: z.string().min(1) }),
+  regiao: z.object({ nome: z.string(), ator }),
+  definirRegiao: z.object({ rua: z.string().min(1), regiaoId: z.string().nullable(), ator, substituir: z.boolean().optional() }),
+  removerRua: z.object({ rua: z.string().min(1), ator, paraAjudanteId: z.string().optional() }),
   filtro: z.object({
     estado: z.enum(ESTADOS).optional(),
     responsavelId: z.string().optional(),
@@ -57,6 +79,40 @@ function corpo<T>(esquema: z.ZodType<T>, valor: unknown): T {
 export function criarApi(ctx: Contexto): express.Router {
   const api = express.Router();
   api.use(express.json({ limit: '25mb' }));
+
+  // Transporte direto HUB ↔ Street (o arquivo continua como fallback)
+  api.use('/street', criarRotasStreet(ctx));
+
+  // ---- Orquestrador ----
+  api.get('/orquestrador', (_req, res) => {
+    res.json({ ruas: listarRuas(ctx), perfis: listarPerfis(ctx), regioes: listarRegioes(ctx) });
+  });
+
+  api.post('/regioes', (req, res) => {
+    const b = corpo(Esquemas.regiao, req.body);
+    res.status(201).json(criarRegiao(ctx, b.nome, b.ator));
+  });
+
+  /** Decide a região de uma rua. Conflito com decisão anterior volta { ok: false, conflito } para revisão. */
+  api.post('/regioes/definir', (req, res) => {
+    res.json(definirRegiao(ctx, corpo(Esquemas.definirRegiao, req.body)));
+  });
+
+  api.post('/orquestrador/atribuir', (req, res) => {
+    res.json(atribuirRuas(ctx, corpo(Esquemas.atribuir, req.body)));
+  });
+
+  api.get('/perfis/:id', (req, res) => {
+    res.json(detalharPerfil(ctx, req.params.id));
+  });
+
+  api.post('/cargas/:id/remover-rua', (req, res) => {
+    res.json(removerRuaDaCarga(ctx, { cargaId: req.params.id, ...corpo(Esquemas.removerRua, req.body) }));
+  });
+
+  api.post('/cargas/:id/finalizar', (req, res) => {
+    res.json(finalizarRota(ctx, req.params.id, corpo(Esquemas.confirmar, req.body).ator));
+  });
 
   api.get('/resumo', (_req, res) => {
     res.json(resumoInventario(ctx));
@@ -95,7 +151,11 @@ export function criarApi(ctx: Contexto): express.Router {
   });
 
   api.post('/ajudantes', (req, res) => {
-    res.status(201).json(cadastrarAjudante(ctx, corpo(Esquemas.ajudante, req.body).nome));
+    res.status(201).json(criarPerfil(ctx, corpo(Esquemas.perfil, req.body)));
+  });
+
+  api.put('/ajudantes/:id', (req, res) => {
+    res.json(editarPerfil(ctx, req.params.id, corpo(Esquemas.perfil, req.body)));
   });
 
   api.get('/importacoes', (_req, res) => {
@@ -160,6 +220,9 @@ export function criarApi(ctx: Contexto): express.Router {
   api.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof ErroAplicacao) return res.status(err.status).json({ erro: err.codigo, mensagem: err.message });
     if (err instanceof ErroDominio) return res.status(409).json({ erro: err.codigo, mensagem: err.message });
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ erro: 'ENTRADA_INVALIDA', mensagem: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
+    }
     console.error(err);
     return res.status(500).json({ erro: 'INTERNO', mensagem: 'erro inesperado no HUB (veja o terminal)' });
   });

@@ -77,6 +77,12 @@ export interface CargaRef {
 /** O pacote entrou numa carga MONTADA (continua no galpão, ATRIBUIDO). */
 export type EventoIncluidoEmCarga = Base<'INCLUIDO_EM_CARGA', { carga: CargaRef; ajudante: AjudanteRef }>;
 
+/** Saiu de uma carga MONTADA antes da rota (rua removida/reatribuída). Continua com o mesmo responsável. */
+export type EventoRetiradoDaCarga = Base<'RETIRADO_DA_CARGA', { carga: CargaRef; motivo: string }>;
+
+/** Volta ao galpão sem responsável (ex.: rua removida da carga antes de iniciar a rota). */
+export type EventoDesatribuido = Base<'DESATRIBUIDO', { de: AjudanteRef; motivo: string }>;
+
 /** A rota da carga foi iniciada pelo operador: agora sim o pacote está na rua. */
 export type EventoSaiuParaRota = Base<'SAIU_PARA_ROTA', { carga: CargaRef; ajudante: AjudanteRef }>;
 
@@ -117,6 +123,8 @@ export type Evento =
   | EventoAtribuido
   | EventoReatribuido
   | EventoIncluidoEmCarga
+  | EventoRetiradoDaCarga
+  | EventoDesatribuido
   | EventoSaiuParaRota
   | EventoEntregaRegistrada
   | EventoInsucessoRegistrado
@@ -226,6 +234,16 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
         throw new ErroDominio('FORA_DO_GALPAO', `pacote em ${atual.estado}${atual.cargaId ? ' e já em carga' : ''} não pode entrar em carga`);
       }
       return { ...base, cargaId: e.dados.carga.id };
+    case 'RETIRADO_DA_CARGA':
+      if (atual.cargaId !== e.dados.carga.id || atual.estado !== 'ATRIBUIDO') {
+        throw new ErroDominio('FORA_DA_CARGA', `só sai da carga ${e.dados.carga.codigo} um pacote dela ainda no galpão`);
+      }
+      return { ...base, cargaId: null };
+    case 'DESATRIBUIDO':
+      if (atual.estado !== 'ATRIBUIDO' || atual.cargaId !== null || atual.responsavelId !== e.dados.de.id) {
+        throw new ErroDominio('TRANSICAO_INVALIDA', 'só volta ao galpão sem responsável um pacote atribuído e fora de carga');
+      }
+      return { ...base, estado: 'NAO_ATRIBUIDO', responsavelId: null };
     case 'SAIU_PARA_ROTA':
       if (atual.responsavelId !== e.dados.ajudante.id) {
         throw new ErroDominio('NAO_E_DO_AJUDANTE', `o pacote não está com ${e.dados.ajudante.nome}`);
@@ -306,6 +324,10 @@ export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string)
       return `Reatribuído: ${e.dados.de.nome} → ${e.dados.para.nome} (responsabilidade transferida)`;
     case 'INCLUIDO_EM_CARGA':
       return `Incluído na carga ${e.dados.carga.codigo} de ${e.dados.ajudante.nome} (carga montada)`;
+    case 'RETIRADO_DA_CARGA':
+      return `Retirado da carga ${e.dados.carga.codigo} (${e.dados.motivo})`;
+    case 'DESATRIBUIDO':
+      return `Voltou ao galpão sem responsável (antes com ${e.dados.de.nome}) — ${e.dados.motivo}`;
     case 'SAIU_PARA_ROTA':
       return `Saiu para rota com ${e.dados.ajudante.nome} na carga ${e.dados.carga.codigo}`;
     case 'ENTREGA_REGISTRADA': {

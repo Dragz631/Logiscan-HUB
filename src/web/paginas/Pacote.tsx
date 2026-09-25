@@ -42,7 +42,7 @@ export function PacotePagina({ id }: { id: string }) {
 
   return (
     <section>
-      <p><a href="#/">← Inventário</a></p>
+      <p><a href="#/inventario">← Inventário</a></p>
       <h1 className="codigo">{p.codigo}</h1>
       <p className="fraco">
         {p.transportadora} · entrou em {dataHora(p.criadoEm)}

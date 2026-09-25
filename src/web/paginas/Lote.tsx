@@ -174,7 +174,7 @@ export function LotePagina({ id }: { id: string }) {
       </div>
       {v.lote.status === 'CONFIRMADO' && (
         <p>
-          <button type="button" className="primario" onClick={() => ir('/')}>Ver inventário</button>
+          <button type="button" className="primario" onClick={() => ir('/inventario')}>Ver inventário</button>
         </p>
       )}
     </section>

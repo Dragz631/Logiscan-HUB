@@ -6,7 +6,7 @@ import { ir, useOperador } from '../contexto';
 import { ROTULO_ESTADO, dataHora, enderecoCurto } from '../formato';
 import { Aviso, useCarregar } from './comum';
 
-export const ROTULO_SITUACAO = { MONTADA: 'Montada (no galpão)', EM_ROTA: 'Na rua', CONCLUIDA: 'Concluída' } as const;
+export const ROTULO_SITUACAO = { MONTADA: 'Montada (no galpão)', EM_ROTA: 'Na rua', CONCLUIDA: 'Concluída', FINALIZADA: 'Finalizada' } as const;
 
 export function Cargas() {
   const { exigir } = useOperador();

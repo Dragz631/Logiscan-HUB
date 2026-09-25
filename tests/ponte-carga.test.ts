@@ -14,6 +14,7 @@ import {
   registrarCorrecao,
 } from '../src/application/cargas';
 import { detalharPacote } from '../src/application/consultas';
+import { finalizarRota } from '../src/application/orquestracao';
 import { confirmarImportacao, prepararImportacao } from '../src/application/importacao';
 import { cadastrarAjudante, entregarAoAjudante } from '../src/application/operacao';
 import type { Contexto } from '../src/application/portas';
@@ -81,7 +82,8 @@ describe('carga montada ≠ em rota', () => {
     expect(eventosDo(ctx, a.id)).toEqual(['IMPORTADO', 'ATRIBUIDO', 'INCLUIDO_EM_CARGA']);
     // já está numa carga montada: não entra em outra
     expect(pacotesParaCarga(ctx, hugo.id)).toEqual([]);
-    expect(() => criarCarga(ctx, { ajudanteId: hugo.id, pacoteIds: [a.id], ator: 'Galpão' })).toThrow(/já está em outra carga/);
+    // um perfil não mistura duas cargas ativas
+    expect(() => criarCarga(ctx, { ajudanteId: hugo.id, pacoteIds: [a.id], ator: 'Galpão' })).toThrow(/já tem a carga .* ativa/);
   });
 
   it('2. iniciar rota coloca carga e pacotes em EM_ROTA', () => {
@@ -122,9 +124,12 @@ describe('carga montada ≠ em rota', () => {
     expect(ctx.armazem.pacotes.porId(a.id)?.estado).toBe('ATRIBUIDO');
   });
 
-  it('segunda carga do mesmo ajudante no dia ganha sequência nova', () => {
+  it('segunda carga do mesmo ajudante no dia (depois de finalizar a primeira) ganha sequência nova', () => {
     const { ctx, hugo, a, b } = cenario();
-    criarCarga(ctx, { ajudanteId: hugo.id, pacoteIds: [a.id], ator: 'Galpão' });
+    const c1 = criarCarga(ctx, { ajudanteId: hugo.id, pacoteIds: [a.id], ator: 'Galpão' });
+    iniciarRota(ctx, c1.id, 'Galpão');
+    receberRetornoStreet(ctx, { arquivo: 'r', conteudo: retornoStreet(hugo, [{ carga_id: c1.id, hub_pacote_id: a.id }]) });
+    finalizarRota(ctx, c1.id, 'Galpão');
     const c2 = criarCarga(ctx, { ajudanteId: hugo.id, pacoteIds: [b.id], ator: 'Galpão' });
     expect(c2.codigo).toBe('C-20260923-HUGO-2');
     expect(listarCargas(ctx).map((c) => c.codigo).sort()).toEqual(['C-20260923-HUGO-1', 'C-20260923-HUGO-2']);
