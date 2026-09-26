@@ -26,6 +26,7 @@ import {
 import { confirmarDestino, entregarAoAjudante, listarAjudantes } from '../application/operacao';
 import {
   atribuirRuas,
+  confirmarRepasses,
   criarPerfil,
   detalharPerfil,
   editarPerfil,
@@ -55,6 +56,11 @@ const Esquemas = {
     veiculo: z.string().nullable().optional(),
     capacidade: z.number().int().positive().nullable().optional(),
     ativo: z.boolean().optional(),
+  }),
+  repasses: z.object({
+    repasses: z.array(z.object({ ajudanteId: z.string().min(1), ruas: z.array(z.string()) })).min(1),
+    ator,
+    chave: z.string().min(1),
   }),
   atribuir: z.object({ ajudanteId: z.string().min(1), ruas: z.array(z.string()).min(1), ator, chave: z.string().min(1) }),
   regiao: z.object({ nome: z.string(), ator }),
@@ -96,6 +102,11 @@ export function criarApi(ctx: Contexto): express.Router {
   /** Decide a região de uma rua. Conflito com decisão anterior volta { ok: false, conflito } para revisão. */
   api.post('/regioes/definir', (req, res) => {
     res.json(definirRegiao(ctx, corpo(Esquemas.definirRegiao, req.body)));
+  });
+
+  /** Confirma o plano de repasses da tela (várias ruas → vários ajudantes), tudo ou nada. */
+  api.post('/orquestrador/repasses', (req, res) => {
+    res.json(confirmarRepasses(ctx, corpo(Esquemas.repasses, req.body)));
   });
 
   api.post('/orquestrador/atribuir', (req, res) => {

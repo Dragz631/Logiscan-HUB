@@ -50,6 +50,11 @@ export const api = {
     chamar<{ carga: { id: string; codigo: string }; pacotes: number }>('/orquestrador/atribuir', {
       body: { ajudanteId, ruas, ator, chave: novaChave() },
     }),
+  confirmarRepasses: (repasses: { ajudanteId: string; ruas: string[] }[], ator: string) =>
+    chamar<{ cargas: { ajudante: string; codigo: string; pacotes: number; ruas: number }[] }>('/orquestrador/repasses', {
+      body: { repasses, ator, chave: novaChave() },
+    }),
+  lotesResumo: () => chamar<{ status: string }[]>('/importacoes'),
   removerRua: (cargaId: string, rua: string, ator: string, paraAjudanteId?: string) =>
     chamar<{ pacotes: number }>(`/cargas/${cargaId}/remover-rua`, { body: { rua, ator, paraAjudanteId } }),
   finalizarRota: (cargaId: string, ator: string) => chamar<{ jaFinalizada: boolean }>(`/cargas/${cargaId}/finalizar`, { body: { ator } }),

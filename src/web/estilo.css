@@ -63,6 +63,11 @@ main { flex: 1; min-width: 0; max-width: 1280px; margin: 0 auto; padding: 1.25re
 .marca { font-weight: 500; letter-spacing: 0.06em; padding: 0 0.5rem; }
 .marca small { display: block; font-size: 0.7rem; letter-spacing: 0.08em; color: var(--fraco); text-transform: uppercase; }
 .lateral nav { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; }
+.botao-novo {
+  display: block; text-align: center; padding: 0.6rem; border-radius: 6px; font-weight: 700; text-decoration: none;
+  background: var(--destaque); color: var(--destaque-texto);
+}
+.botao-novo:hover { filter: brightness(1.08); }
 .lateral nav .secao { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fraco); padding: 0.75rem 0.6rem 0.25rem; }
 .lateral nav a { padding: 0.45rem 0.6rem; border-radius: 6px; text-decoration: none; color: var(--texto); }
 .lateral nav a:hover { background: var(--marcada); }
@@ -195,30 +200,10 @@ tr.marcada td { background: var(--marcada); }
 .ok-txt { color: var(--ok); }
 .pendente-txt { color: var(--alerta); }
 
-.card-rua {
-  display: flex; gap: 0.7rem; align-items: flex-start; padding: 0.65rem 0.75rem; cursor: pointer;
-  border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo);
-}
-.card-rua input { margin-top: 0.25rem; }
-.card-rua .corpo { flex: 1; min-width: 0; }
-.card-rua.marcada { border-color: var(--destaque); box-shadow: 0 0 0 1px var(--destaque); background: var(--marcada); }
-.card-rua.travada { cursor: default; opacity: 0.75; }
-.grupo-regiao { display: flex; flex-direction: column; gap: 0.4rem; padding-bottom: 0.4rem; }
-.grupo-regiao + .grupo-regiao { border-top: 1px dashed var(--borda); padding-top: 0.6rem; }
-.grupo-topo { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
-.grupo-topo label { display: flex; gap: 0.45rem; align-items: center; cursor: pointer; }
-.grupo-desconhecida .grupo-topo b { color: var(--alerta); }
 .escolha-regiao { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
 .escolha-regiao select { flex: 1; min-width: 0; }
 .link-mini { background: none; border: 0; padding: 0; color: var(--destaque); font-size: 0.8rem; cursor: pointer; }
 
-.card-perfil { border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); position: relative; }
-.card-perfil .area {
-  display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 0.7rem 0.8rem 0.6rem; border-radius: 8px;
-}
-.card-perfil.escolhido { border-color: var(--projecao); box-shadow: 0 0 0 1px var(--projecao); background: var(--projecao-fundo); }
-.card-perfil.travado { opacity: 0.7; }
-.card-perfil .abrir { position: absolute; right: 0.8rem; bottom: 0.45rem; font-size: 0.78rem; }
 
 .barra { position: relative; height: 6px; border-radius: 999px; background: var(--borda); overflow: hidden; margin: 0.4rem 0 0.25rem; }
 .barra .cheia { position: absolute; left: 0; top: 0; bottom: 0; background: var(--destaque); border-radius: 999px; }
@@ -253,3 +238,77 @@ tr.marcada td { background: var(--marcada); }
 .card-link { color: inherit; text-decoration: none; display: block; }
 .card-link:hover { border-color: var(--destaque); }
 .card-link.travado { opacity: 0.6; }
+
+/* ---- Orquestrador de repasse (origem: ruas → destino: ajudantes) -------- */
+.repasse-cabecalho { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.repasse-cabecalho h1 { margin: 0 0 0.25rem; }
+.repasse-cabecalho > div:first-child { flex: 1 1 18rem; min-width: 0; }
+.repasse-cabecalho .acoes { flex-shrink: 0; }
+.repasse-cabecalho .acoes { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.repasse-cabecalho .acoes button { padding: 0.55rem 1rem; font-weight: 600; }
+.chip-status { text-decoration: none; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.7rem; padding: 0.3rem 0.65rem; }
+.chip-alerta { color: var(--alerta); background: var(--alerta-fundo); border-color: transparent; }
+.repasse-busca { margin-bottom: 0.75rem; }
+.repasse-busca input { width: 100%; max-width: 28rem; }
+
+.painel-topo { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.painel-topo h2 { margin: 0; font-size: 1rem; }
+.selo-contagem {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 0.2rem 0.5rem; border: 1px solid var(--borda); border-radius: 4px; color: var(--fraco); background: var(--fundo);
+}
+.painel .filtros { align-items: center; }
+.painel .filtros .check { display: flex; gap: 0.35rem; align-items: center; font-size: 0.82rem; color: var(--fraco); }
+.dica { margin: 0 0 0.5rem; font-size: 0.82rem; color: var(--projecao); font-weight: 600; }
+
+.tile-rua {
+  display: block; border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); cursor: pointer; overflow: hidden;
+}
+.tile-rua .faixa {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.65rem; font-size: 0.72rem;
+  background: var(--superficie); border-bottom: 1px solid var(--borda);
+}
+.tile-rua .estado-rua { font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; background: transparent !important; }
+.tile-rua .planejado { color: var(--projecao); font-weight: 700; }
+.tile-rua .tag-regiao { margin-left: auto; background: none; border: 0; padding: 0; font-size: 0.72rem; color: var(--fraco); cursor: pointer; }
+.tile-rua .tag-regiao.a-definir { color: var(--alerta); font-weight: 700; }
+.tile-rua .corpo-tile { display: flex; align-items: center; gap: 0.65rem; padding: 0.6rem 0.65rem; }
+.tile-rua .icone {
+  width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center; border-radius: 6px;
+  background: var(--marcada); color: var(--destaque);
+}
+.tile-rua .info { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 0.82rem; }
+.tile-rua .info b { font-size: 0.95rem; }
+.grande-qtd { font-size: 1.15rem; }
+.tile-rua .escolha-regiao { padding: 0 0.65rem 0.6rem; margin: 0; }
+.tile-rua.marcada { border-color: var(--destaque); box-shadow: 0 0 0 1px var(--destaque); }
+.tile-rua.marcada .corpo-tile { background: var(--marcada); }
+.tile-rua.planejada { border-style: dashed; border-color: var(--projecao); }
+.tile-rua.travada { cursor: default; opacity: 0.72; }
+.tile-rua[draggable='true'] { cursor: grab; }
+
+.card-ajudante { border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); padding: 0.7rem 0.8rem 0.6rem; }
+.card-ajudante .area {
+  display: flex; align-items: center; gap: 0.7rem; width: 100%; text-align: left; background: transparent; border: 0; padding: 0; color: inherit;
+}
+.card-ajudante .area:disabled { opacity: 1; cursor: default; }
+.card-ajudante .area:not(:disabled):hover .avatar { outline: 2px solid var(--projecao); }
+.card-ajudante .avatar {
+  width: 40px; height: 40px; flex-shrink: 0; border-radius: 6px; display: grid; place-items: center;
+  background: var(--marcada); color: var(--destaque); font-weight: 700;
+}
+.card-ajudante .quem { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 0.8rem; }
+.card-ajudante .quem b { font-size: 1rem; }
+.card-ajudante .capacidade { display: flex; flex-direction: column; align-items: flex-end; font-size: 0.66rem; letter-spacing: 0.05em; }
+.card-ajudante .capacidade .qtd { font-size: 1rem; letter-spacing: 0; }
+.card-ajudante .rodape-card { display: flex; gap: 0.75rem; align-items: center; font-size: 0.8rem; min-height: 1.1rem; }
+.card-ajudante .abrir { margin-left: auto; font-size: 0.78rem; }
+.card-ajudante.com-plano { border-color: var(--projecao); box-shadow: 0 0 0 1px var(--projecao); background: var(--projecao-fundo); }
+.card-ajudante.drop-alvo { border-color: var(--projecao); border-style: dashed; background: var(--projecao-fundo); }
+.card-ajudante.travado { opacity: 0.6; }
+.plano-chips { list-style: none; margin: 0.5rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.plano-chips li {
+  display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; padding: 0.15rem 0.2rem 0.15rem 0.55rem;
+  border: 1px solid var(--projecao); border-radius: 999px; background: var(--superficie);
+}
+.plano-chips button { border: 0; background: none; padding: 0 0.3rem; color: var(--fraco); line-height: 1; }

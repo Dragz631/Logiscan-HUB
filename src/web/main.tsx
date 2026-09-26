@@ -59,9 +59,10 @@ function App() {
             LOGISCAN <b>HUB</b>
             <small>orquestração</small>
           </div>
+          <a href="#/importar" className="botao-novo">+ Importar lote</a>
           <nav>
             <span className="secao">Operação</span>
-            <a href="#/" className={ativo('')}>Orquestrador de ruas</a>
+            <a href="#/" className={ativo('')}>Orquestrador de repasse</a>
             <a href="#/cargas" className={ativo('cargas')}>Cargas</a>
             <a href="#/ajudantes" className={ativo('ajudantes')}>Ajudantes</a>
             <span className="secao">Pacotes</span>

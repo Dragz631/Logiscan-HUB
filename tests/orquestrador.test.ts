@@ -8,6 +8,7 @@ import { confirmarImportacao, prepararImportacao } from '../src/application/impo
 import { entregarAoAjudante } from '../src/application/operacao';
 import {
   atribuirRuas,
+  confirmarRepasses,
   criarPerfil,
   detalharPerfil,
   editarPerfil,
@@ -299,5 +300,61 @@ describe('destino continua intacto na orquestração', () => {
       'rua x|120|comercio:loja abc',
       'rua x|120|condominio:xyz',
     ]);
+  });
+});
+
+describe('repasse em lote (tela Orquestrador de Repasse)', () => {
+  it('confirma o plano inteiro: várias ruas para vários ajudantes, cada um com sua carga MONTADA', () => {
+    const { ctx, hugo, ana } = operacao();
+    const r = confirmarRepasses(ctx, {
+      repasses: [
+        { ajudanteId: hugo.id, ruas: ['Rua X', 'Rua Carlos Seidl'] },
+        { ajudanteId: ana.id, ruas: ['Rua Leão XIII'] },
+      ],
+      ator: 'Galpão',
+      chave: 'plano-1',
+    });
+    expect(r.cargas).toEqual([
+      { ajudante: 'Hugo', codigo: 'C-20260923-HUGO-1', pacotes: 5, ruas: 2 },
+      { ajudante: 'Ana', codigo: 'C-20260923-ANA-1', pacotes: 1, ruas: 1 },
+    ]);
+    expect(porCodigo(ctx, 'L1').responsavelId).toBe(ana.id);
+  });
+
+  it('tudo ou nada: um repasse inválido não deixa nenhum outro gravado', () => {
+    const { ctx, hugo, ana } = operacao();
+    atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: ['Rua X'], ator: 'Galpão', chave: 'antes' });
+    expect(() =>
+      confirmarRepasses(ctx, {
+        repasses: [
+          { ajudanteId: ana.id, ruas: ['Rua Leão XIII'] },
+          { ajudanteId: ana.id, ruas: ['Rua X'] }, // já é do Hugo
+        ],
+        ator: 'Galpão',
+        chave: 'plano-2',
+      }),
+    ).toThrow(/com Hugo/);
+    expect(porCodigo(ctx, 'L1').responsavelId).toBeNull();
+    expect(detalharPerfil(ctx, ana.id).carga).toBeNull();
+  });
+
+  it('a mesma rua não pode estar planejada para dois ajudantes', () => {
+    const { ctx, hugo, ana } = operacao();
+    expect(() =>
+      confirmarRepasses(ctx, {
+        repasses: [{ ajudanteId: hugo.id, ruas: ['Rua X'] }, { ajudanteId: ana.id, ruas: ['RUA X'] }],
+        ator: 'Galpão',
+        chave: 'plano-3',
+      }),
+    ).toThrow(/mais de um ajudante/);
+  });
+
+  it('retry do mesmo plano (mesma chave) não duplica', () => {
+    const { ctx, hugo } = operacao();
+    const plano = { repasses: [{ ajudanteId: hugo.id, ruas: ['Rua X'] }], ator: 'Galpão', chave: 'plano-4' };
+    confirmarRepasses(ctx, plano);
+    const antes = tipos(ctx, 'X1');
+    expect(confirmarRepasses(ctx, plano).cargas[0].pacotes).toBe(3);
+    expect(tipos(ctx, 'X1')).toEqual(antes);
   });
 });

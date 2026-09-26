@@ -348,3 +348,40 @@ export function finalizarRota(ctx: Contexto, cargaId: string, ator: string): { j
     return { jaFinalizada: false };
   });
 }
+
+// ---------------------------------------------------------------------------
+// Repasse em lote (tela "Orquestrador de Repasse")
+// ---------------------------------------------------------------------------
+
+export interface PlanoRepasse {
+  ajudanteId: string;
+  ruas: string[];
+}
+
+/**
+ * Confirma um PLANO de repasses (várias ruas para vários ajudantes) de uma vez só.
+ * Tudo ou nada: se uma rua não puder ir para o ajudante planejado, nenhum repasse é gravado.
+ * Cada repasse segue as mesmas regras de `atribuirRuas` (rua inteira, sem dividir, carga ativa única).
+ */
+export function confirmarRepasses(
+  ctx: Contexto,
+  entrada: { repasses: PlanoRepasse[]; ator: string; chave: string },
+): { cargas: { ajudante: string; codigo: string; pacotes: number; ruas: number }[] } {
+  // Um bloco por ajudante (a chave de idempotência é por ajudante; dois blocos dele se confundiriam com retry).
+  const porAjudante = new Map<string, string[]>();
+  for (const r of entrada.repasses) {
+    if (r.ruas.length) porAjudante.set(r.ajudanteId, [...(porAjudante.get(r.ajudanteId) ?? []), ...r.ruas]);
+  }
+  const planos = [...porAjudante].map(([ajudanteId, ruas]) => ({ ajudanteId, ruas }));
+  if (planos.length === 0) throw new ErroAplicacao('PLANO_VAZIO', 'nenhum repasse planejado');
+  const todas = planos.flatMap((p) => p.ruas.map(chaveRua));
+  if (new Set(todas).size !== todas.length) {
+    throw new ErroAplicacao('RUA_REPETIDA_NO_PLANO', 'a mesma rua foi planejada para mais de um ajudante');
+  }
+  return ctx.armazem.transacao(() => ({
+    cargas: planos.map((p) => {
+      const r = atribuirRuas(ctx, { ajudanteId: p.ajudanteId, ruas: p.ruas, ator: entrada.ator, chave: `${entrada.chave}:${p.ajudanteId}` });
+      return { ajudante: r.carga.ajudante.nome, codigo: r.carga.codigo, pacotes: r.pacotes, ruas: r.ruas.length };
+    }),
+  }));
+}
