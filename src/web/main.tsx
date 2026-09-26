@@ -10,6 +10,7 @@ import { Inventario } from './paginas/Inventario';
 import { LotePagina } from './paginas/Lote';
 import { Orquestrador } from './paginas/Orquestrador';
 import { PerfilPagina } from './paginas/Perfil';
+import { Regioes } from './paginas/Regioes';
 import { PacotePagina } from './paginas/Pacote';
 
 const CHAVE_OPERADOR = 'hub.operador';
@@ -46,6 +47,7 @@ function App() {
   else if (pagina === 'ajudantes' && id) conteudo = <PerfilPagina id={id} />;
   else if (pagina === 'ajudantes') conteudo = <Ajudantes />;
   else if (pagina === 'inventario') conteudo = <Inventario />;
+  else if (pagina === 'regioes') conteudo = <Regioes />;
   else if (pagina === 'cargas' && id) conteudo = <CargaPagina id={id} />;
   else if (pagina === 'cargas') conteudo = <Cargas />;
   else conteudo = <Orquestrador />;
@@ -65,6 +67,7 @@ function App() {
             <a href="#/" className={ativo('')}>Orquestrador de repasse</a>
             <a href="#/cargas" className={ativo('cargas')}>Cargas</a>
             <a href="#/ajudantes" className={ativo('ajudantes')}>Ajudantes</a>
+            <a href="#/regioes" className={ativo('regioes')}>Regiões</a>
             <span className="secao">Pacotes</span>
             <a href="#/importar" className={ativo('importar') || ativo('importacoes')}>Importar</a>
             <a href="#/inventario" className={ativo('inventario') || ativo('pacotes')}>Inventário</a>

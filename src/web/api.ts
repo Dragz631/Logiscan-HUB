@@ -1,7 +1,7 @@
 /** Cliente da API do HUB. A tela só conversa com o backend por aqui. */
 import type { DetalheCarga, ResultadoRetorno, ResumoCarga } from '../application/cargas';
 import type { DadosPerfil, DetalhePerfil, ResumoPerfil, RuaNoOrquestrador } from '../application/orquestracao';
-import type { ResultadoDefinicao } from '../application/regioes';
+import type { RegiaoComRuas, ResultadoDefinicao } from '../application/regioes';
 import type { Regiao } from '../domain/regioes';
 import type { DocumentoCargaV0 } from '../contracts/cargaV0';
 import type { Pacote } from '../domain/pacote';
@@ -39,9 +39,12 @@ export const api = {
   editarPerfil: (id: string, d: DadosPerfil) => chamar<Ajudante>(`/ajudantes/${id}`, { method: 'PUT', body: d }),
   perfil: (id: string) => chamar<DetalhePerfil>(`/perfis/${id}`),
   orquestrador: () => chamar<{ ruas: RuaNoOrquestrador[]; perfis: ResumoPerfil[]; regioes: Regiao[] }>('/orquestrador'),
-  criarRegiao: (nome: string, ator: string) => chamar<Regiao>('/regioes', { body: { nome, ator } }),
-  definirRegiao: (rua: string, regiaoId: string | null, ator: string, substituir = false) =>
-    chamar<ResultadoDefinicao>('/regioes/definir', { body: { rua, regiaoId, ator, substituir } }),
+  criarRegiao: (nome: string, ator: string, repasseUnico = false) => chamar<Regiao>('/regioes', { body: { nome, ator, repasseUnico } }),
+  definirRegiao: (rua: string, regiaoId: string | null, ator: string, substituir = false, prioridade?: number | null) =>
+    chamar<ResultadoDefinicao>('/regioes/definir', {
+      body: { rua, regiaoId, ator, substituir, ...(prioridade !== undefined ? { prioridade } : {}) },
+    }),
+  mapaRegioes: () => chamar<{ regioes: RegiaoComRuas[]; semRegiao: RegiaoComRuas['ruas'] }>('/regioes'),
   atribuirRuas: (ajudanteId: string, ruas: string[], ator: string) =>
     chamar<{ carga: { id: string; codigo: string }; pacotes: number }>('/orquestrador/atribuir', {
       body: { ajudanteId, ruas, ator, chave: novaChave() },

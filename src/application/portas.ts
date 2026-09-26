@@ -17,8 +17,6 @@ export interface Ajudante {
   criadoEm: string;
   /** Ex.: "Moto", "Bicicleta", "A pé". Livre, informativo. */
   veiculo: string | null;
-  /** Pacotes que costuma levar numa saída. Só gera AVISO de excesso, nunca bloqueia. */
-  capacidade: number | null;
 }
 
 export type StatusLote = 'PREVIA' | 'CONFIRMADO' | 'DESCARTADO';

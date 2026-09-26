@@ -35,7 +35,7 @@ import {
   listarRuas,
   removerRuaDaCarga,
 } from '../application/orquestracao';
-import { criarRegiao, definirRegiao, listarRegioes } from '../application/regioes';
+import { criarRegiao, definirRegiao, listarRegioes, mapaDeRegioes } from '../application/regioes';
 import { criarRotasStreet } from './street';
 import type { Contexto } from '../application/portas';
 import { ErroDominio } from '../domain/eventos';
@@ -54,7 +54,6 @@ const Esquemas = {
   perfil: z.object({
     nome: z.string(),
     veiculo: z.string().nullable().optional(),
-    capacidade: z.number().int().positive().nullable().optional(),
     ativo: z.boolean().optional(),
   }),
   repasses: z.object({
@@ -63,8 +62,14 @@ const Esquemas = {
     chave: z.string().min(1),
   }),
   atribuir: z.object({ ajudanteId: z.string().min(1), ruas: z.array(z.string()).min(1), ator, chave: z.string().min(1) }),
-  regiao: z.object({ nome: z.string(), ator }),
-  definirRegiao: z.object({ rua: z.string().min(1), regiaoId: z.string().nullable(), ator, substituir: z.boolean().optional() }),
+  regiao: z.object({ nome: z.string(), ator, repasseUnico: z.boolean().optional() }),
+  definirRegiao: z.object({
+    rua: z.string().min(1),
+    regiaoId: z.string().nullable(),
+    ator,
+    substituir: z.boolean().optional(),
+    prioridade: z.number().int().positive().nullable().optional(),
+  }),
   removerRua: z.object({ rua: z.string().min(1), ator, paraAjudanteId: z.string().optional() }),
   filtro: z.object({
     estado: z.enum(ESTADOS).optional(),
@@ -96,7 +101,12 @@ export function criarApi(ctx: Contexto): express.Router {
 
   api.post('/regioes', (req, res) => {
     const b = corpo(Esquemas.regiao, req.body);
-    res.status(201).json(criarRegiao(ctx, b.nome, b.ator));
+    res.status(201).json(criarRegiao(ctx, b.nome, b.ator, !!b.repasseUnico));
+  });
+
+  /** Mapa operacional: regiões e os logradouros ensinados a cada uma. */
+  api.get('/regioes', (_req, res) => {
+    res.json(mapaDeRegioes(ctx));
   });
 
   /** Decide a região de uma rua. Conflito com decisão anterior volta { ok: false, conflito } para revisão. */

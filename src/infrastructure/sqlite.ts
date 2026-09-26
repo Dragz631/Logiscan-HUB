@@ -335,7 +335,6 @@ class Ajudantes implements RepositorioAjudantes {
     ativo: Number(r.ativo) === 1,
     criadoEm: String(r.criado_em),
     veiculo: str(r.veiculo),
-    capacidade: r.capacidade === null || r.capacidade === undefined ? null : Number(r.capacidade),
   });
 
   porId(id: string) {
@@ -349,14 +348,14 @@ class Ajudantes implements RepositorioAjudantes {
 
   criar(a: Ajudante) {
     this.db
-      .prepare('INSERT INTO ajudantes (id, nome, ativo, criado_em, veiculo, capacidade) VALUES (?,?,?,?,?,?)')
-      .run(a.id, a.nome, a.ativo ? 1 : 0, a.criadoEm, a.veiculo, a.capacidade);
+      .prepare('INSERT INTO ajudantes (id, nome, ativo, criado_em, veiculo) VALUES (?,?,?,?,?)')
+      .run(a.id, a.nome, a.ativo ? 1 : 0, a.criadoEm, a.veiculo);
   }
 
   atualizar(a: Ajudante) {
     this.db
-      .prepare('UPDATE ajudantes SET nome = ?, ativo = ?, veiculo = ?, capacidade = ? WHERE id = ?')
-      .run(a.nome, a.ativo ? 1 : 0, a.veiculo, a.capacidade, a.id);
+      .prepare('UPDATE ajudantes SET nome = ?, ativo = ?, veiculo = ? WHERE id = ?')
+      .run(a.nome, a.ativo ? 1 : 0, a.veiculo, a.id);
   }
 }
 
@@ -463,9 +462,11 @@ class Regioes implements RepositorioRegioes {
 
   private regiao = (r: Linha): Regiao => ({
     id: String(r.id), nome: String(r.nome), criadaEm: String(r.criada_em), criadaPor: String(r.criada_por),
+    repasseUnico: Number(r.repasse_unico ?? 0) === 1,
   });
   private assoc = (r: Linha): Associacao => ({
     ruaChave: String(r.rua_chave), ruaNome: String(r.rua_nome), regiaoId: str(r.regiao_id),
+    prioridade: r.prioridade === null || r.prioridade === undefined ? null : Number(r.prioridade),
     definidaEm: String(r.definida_em), definidaPor: String(r.definida_por),
   });
 
@@ -481,7 +482,9 @@ class Regioes implements RepositorioRegioes {
     return r ? this.regiao(r) : undefined;
   }
   criar(r: Regiao) {
-    this.db.prepare('INSERT INTO regioes (id, nome, criada_em, criada_por) VALUES (?,?,?,?)').run(r.id, r.nome, r.criadaEm, r.criadaPor);
+    this.db
+      .prepare('INSERT INTO regioes (id, nome, criada_em, criada_por, repasse_unico) VALUES (?,?,?,?,?)')
+      .run(r.id, r.nome, r.criadaEm, r.criadaPor, r.repasseUnico ? 1 : 0);
   }
   associacoes() {
     return new Map(this.db.prepare('SELECT * FROM regioes_ruas').all().map((r) => [String(r.rua_chave), this.assoc(r)] as const));
@@ -493,11 +496,11 @@ class Regioes implements RepositorioRegioes {
   definir(a: Associacao) {
     this.db
       .prepare(
-        `INSERT INTO regioes_ruas (rua_chave, rua_nome, regiao_id, definida_em, definida_por) VALUES (?,?,?,?,?)
+        `INSERT INTO regioes_ruas (rua_chave, rua_nome, regiao_id, definida_em, definida_por, prioridade) VALUES (?,?,?,?,?,?)
          ON CONFLICT (rua_chave) DO UPDATE SET rua_nome=excluded.rua_nome, regiao_id=excluded.regiao_id,
-           definida_em=excluded.definida_em, definida_por=excluded.definida_por`,
+           definida_em=excluded.definida_em, definida_por=excluded.definida_por, prioridade=excluded.prioridade`,
       )
-      .run(a.ruaChave, a.ruaNome, a.regiaoId, a.definidaEm, a.definidaPor);
+      .run(a.ruaChave, a.ruaNome, a.regiaoId, a.definidaEm, a.definidaPor, a.prioridade);
   }
   anexarEvento(e: EventoRegiao) {
     this.db

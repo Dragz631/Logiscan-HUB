@@ -16,6 +16,7 @@ import type { EstadoPacote, Pacote } from '../domain/pacote';
 import { ErroAplicacao } from './erros';
 import type { Contexto } from './portas';
 import { type RuaDoPerfil, ruasDaCarga } from './orquestracao';
+import { resolvedorDeRua } from './regioes';
 import { registrarEvento } from './registrarEvento';
 
 /** Pacotes que podem entrar numa carga nova do ajudante: com ele, no galpão e fora de outra carga. */
@@ -328,7 +329,7 @@ function resumir(ctx: Contexto, c: Carga): ResumoCarga & { pacotes: Pacote[] } {
     finalizadaEm: c.finalizadaEm,
     finalizadaPor: c.finalizadaPor,
     situacao: situacaoCarga(c.rotaIniciadaEm, pacotes.map((p) => p.estado), c.finalizadaEm),
-    ruas: ruasDaCarga(pacotes),
+    ruas: ruasDaCarga(pacotes, resolvedorDeRua(ctx)),
     total: pacotes.length,
     porEstado,
     pacotes,

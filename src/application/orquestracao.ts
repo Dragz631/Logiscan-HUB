@@ -16,27 +16,23 @@ import { type ResumoRua, agruparPorRua, chaveRua, naOperacao } from '../domain/r
 import { ErroAplicacao } from './erros';
 import type { Ajudante, Contexto } from './portas';
 import { registrarEvento } from './registrarEvento';
-import { type RegiaoDaRua, consultorDeRegioes } from './regioes';
+import { type RegiaoDaRua, consultorDeRegioes, resolvedorDeRua } from './regioes';
 
 // ---------------------------------------------------------------------------
 // Perfis
 // ---------------------------------------------------------------------------
 
+/** Perfil: nome, veículo, ativo. Sem "capacidade": a operação não bloqueia nem mede lotação. */
 export interface DadosPerfil {
   nome: string;
   veiculo?: string | null;
-  capacidade?: number | null;
   ativo?: boolean;
 }
 
-function validarPerfil(d: DadosPerfil): { nome: string; veiculo: string | null; capacidade: number | null } {
+function validarPerfil(d: DadosPerfil): { nome: string; veiculo: string | null } {
   const nome = d.nome.replace(/\s+/g, ' ').trim();
   if (!nome) throw new ErroAplicacao('NOME_VAZIO', 'informe o nome do ajudante');
-  const capacidade = d.capacidade === undefined || d.capacidade === null ? null : Math.trunc(Number(d.capacidade));
-  if (capacidade !== null && (!Number.isFinite(capacidade) || capacidade <= 0)) {
-    throw new ErroAplicacao('CAPACIDADE_INVALIDA', 'capacidade deve ser um número de pacotes maior que zero');
-  }
-  return { nome, veiculo: d.veiculo?.trim() || null, capacidade };
+  return { nome, veiculo: d.veiculo?.trim() || null };
 }
 
 export function criarPerfil(ctx: Contexto, d: DadosPerfil): Ajudante {
@@ -85,7 +81,7 @@ export type RuaNoOrquestrador = ResumoRua & { regiao: RegiaoDaRua };
 /** Ruas da operação, cada uma com a região vinda da memória do HUB (desconhecida = revisão). */
 export function listarRuas(ctx: Contexto): RuaNoOrquestrador[] {
   const regiaoDe = consultorDeRegioes(ctx);
-  return agruparPorRua(pacotesNaOperacao(ctx).pacotes).map((r) => ({ ...r, regiao: regiaoDe(r.chave) }));
+  return agruparPorRua(pacotesNaOperacao(ctx).pacotes, resolvedorDeRua(ctx)).map((r) => ({ ...r, regiao: regiaoDe(r.chave) }));
 }
 
 export interface ResumoPerfil {
@@ -98,12 +94,9 @@ export interface ResumoPerfil {
   pendentes: number;
   /** % de pacotes com desfecho. */
   progresso: number;
-  /** pacotes / capacidade (null sem capacidade definida). */
-  ocupacao: number | null;
-  excesso: boolean;
 }
 
-function resumoPerfil(ctx: Contexto, a: Ajudante): ResumoPerfil {
+function resumoPerfil(ctx: Contexto, a: Ajudante, ruaDe = resolvedorDeRua(ctx)): ResumoPerfil {
   const carga = ctx.armazem.cargas.ativaDoAjudante(a.id) ?? null;
   const pacotes = carga ? carga.pacoteIds.map((id) => ctx.armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p) : [];
   const entregues = pacotes.filter((p) => p.estado === 'ENTREGUE').length;
@@ -113,18 +106,17 @@ function resumoPerfil(ctx: Contexto, a: Ajudante): ResumoPerfil {
     ajudante: a,
     carga: carga && situacao ? { id: carga.id, codigo: carga.codigo, situacao } : null,
     pacotes: pacotes.length,
-    ruas: new Set(pacotes.map((p) => chaveRua(p.dados.rua))).size,
+    ruas: new Set(pacotes.map((p) => ruaDe(p).chave)).size,
     entregues,
     insucessos,
     pendentes: pacotes.length - entregues - insucessos,
     progresso: pacotes.length ? Math.round(((entregues + insucessos) / pacotes.length) * 100) : 0,
-    ocupacao: a.capacidade ? pacotes.length / a.capacidade : null,
-    excesso: a.capacidade !== null && pacotes.length > a.capacidade,
   };
 }
 
 export function listarPerfis(ctx: Contexto): ResumoPerfil[] {
-  return ctx.armazem.ajudantes.listar().map((a) => resumoPerfil(ctx, a));
+  const ruaDe = resolvedorDeRua(ctx);
+  return ctx.armazem.ajudantes.listar().map((a) => resumoPerfil(ctx, a, ruaDe));
 }
 
 export interface RuaDoPerfil extends RuaRef {
@@ -133,16 +125,67 @@ export interface RuaDoPerfil extends RuaRef {
   pendentes: number;
 }
 
+/** Uma parada = um DESTINO (rua + nº + contexto) com os pacotes dele. Região ≠ rua ≠ destino. */
+export interface Parada {
+  destinoId: string;
+  ruaChave: string;
+  rua: string;
+  numero: string;
+  /** Como aparece no card: "Rua Carlos Seidl, 133 — Loja ABC". */
+  titulo: string;
+  bairro: string;
+  pacotes: { id: string; codigo: string; destinatario: string; estado: Pacote['estado']; complemento: string; motivoInsucesso: string | null }[];
+}
+
 export interface DetalhePerfil extends ResumoPerfil {
-  ruasDaCarga: RuaDoPerfil[];
+  ruasDaCarga: (RuaDoPerfil & { regiao: RegiaoDaRua })[];
   rotaIniciadaEm: string | null;
   montadaEm: string | null;
+  /** Quando o Street do ajudante recebeu a carga (null = ainda não está no Street). */
+  recebidaNoStreetEm: string | null;
+  /** Sequência de paradas — só faz sentido quando a carga já está no Street. */
+  paradas: Parada[];
   /** Últimos acontecimentos dos pacotes da carga atual (mais recentes primeiro). */
   ocorrencias: (Evento & { codigo: string })[];
 }
 
-export function ruasDaCarga(pacotes: Pacote[]): RuaDoPerfil[] {
-  return agruparPorRua(pacotes).map((r) => ({
+const numeroOrdem = (n: string) => {
+  const m = /\d+/.exec(n);
+  return m ? Number(m[0]) : Number.MAX_SAFE_INTEGER;
+};
+
+export function montarParadas(pacotes: Pacote[], ruaDe: (p: Pacote) => { chave: string; nome: string }): Parada[] {
+  const porDestino = new Map<string, Parada>();
+  for (const p of pacotes) {
+    const rua = ruaDe(p);
+    const chave = p.destinoId ?? `${rua.chave}|${p.dados.numero}|${p.dados.complemento}`;
+    if (!porDestino.has(chave)) {
+      porDestino.set(chave, {
+        destinoId: chave,
+        ruaChave: rua.chave,
+        rua: rua.nome,
+        numero: p.dados.numero || 'S/N',
+        titulo: `${p.dados.rua}, ${p.dados.numero || 'S/N'}`,
+        bairro: p.dados.bairro,
+        pacotes: [],
+      });
+    }
+    porDestino.get(chave)!.pacotes.push({
+      id: p.id,
+      codigo: p.codigo,
+      destinatario: p.dados.destinatario,
+      estado: p.estado,
+      complemento: p.dados.complemento,
+      motivoInsucesso: p.motivoInsucesso,
+    });
+  }
+  return [...porDestino.values()].sort(
+    (a, b) => a.rua.localeCompare(b.rua, 'pt-BR') || numeroOrdem(a.numero) - numeroOrdem(b.numero) || a.titulo.localeCompare(b.titulo, 'pt-BR'),
+  );
+}
+
+export function ruasDaCarga(pacotes: Pacote[], ruaDe?: (p: Pacote) => { chave: string; nome: string }): RuaDoPerfil[] {
+  return agruparPorRua(pacotes, ruaDe).map((r) => ({
     chave: r.chave,
     nome: r.nome,
     quantidade: r.total,
@@ -155,19 +198,33 @@ export function ruasDaCarga(pacotes: Pacote[]): RuaDoPerfil[] {
 export function detalharPerfil(ctx: Contexto, ajudanteId: string): DetalhePerfil {
   const a = ctx.armazem.ajudantes.porId(ajudanteId);
   if (!a) throw new ErroAplicacao('AJUDANTE_INEXISTENTE', 'ajudante não encontrado', 404);
-  const r = resumoPerfil(ctx, a);
+  const ruaDe = resolvedorDeRua(ctx);
+  const regiaoDe = consultorDeRegioes(ctx);
+  const r = resumoPerfil(ctx, a, ruaDe);
   const carga = ctx.armazem.cargas.ativaDoAjudante(a.id);
   const pacotes = carga ? carga.pacoteIds.map((id) => ctx.armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p) : [];
   const ocorrencias = pacotes
     .flatMap((p) => ctx.armazem.eventos.doPacote(p.id).map((e) => ({ ...e, codigo: p.codigo })))
     .sort((x, y) => y.ocorridoEm.localeCompare(x.ocorridoEm))
     .slice(0, 15);
-  return { ...r, ruasDaCarga: ruasDaCarga(pacotes), rotaIniciadaEm: carga?.rotaIniciadaEm ?? null, montadaEm: carga?.criadaEm ?? null, ocorrencias };
+  const recebida = carga ? ctx.armazem.cargas.eventos(carga.id).filter((e) => e.tipo === 'RECEBIDA_NO_STREET').at(-1) : undefined;
+  return {
+    ...r,
+    ruasDaCarga: ruasDaCarga(pacotes, ruaDe).map((x) => ({ ...x, regiao: regiaoDe(x.chave) })),
+    rotaIniciadaEm: carga?.rotaIniciadaEm ?? null,
+    montadaEm: carga?.criadaEm ?? null,
+    recebidaNoStreetEm: recebida?.ocorridoEm ?? null,
+    paradas: recebida ? montarParadas(pacotes, ruaDe) : [],
+    ocorrencias,
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Atribuir ruas → carga MONTADA
 // ---------------------------------------------------------------------------
+
+/** Chave de rua vinda da tela: nome de rua é normalizado; grupo (`regiao:<id>`, ex.: Diversos) passa intacto. */
+const chaveEntrada = (k: string) => (k.startsWith('regiao:') ? k : chaveRua(k));
 
 function erroDominio<T>(fn: () => T, codigo?: string): T {
   try {
@@ -186,7 +243,7 @@ export function atribuirRuas(
   ctx: Contexto,
   entrada: { ajudanteId: string; ruas: string[]; ator: string; chave: string },
 ): { carga: Carga; pacotes: number; ruas: RuaRef[] } {
-  const chaves = [...new Set(entrada.ruas.map(chaveRua).filter(Boolean))];
+  const chaves = [...new Set(entrada.ruas.map(chaveEntrada).filter(Boolean))];
   if (chaves.length === 0) throw new ErroAplicacao('SEM_RUAS', 'selecione ao menos uma rua');
   if (!entrada.chave) throw new ErroAplicacao('SEM_CHAVE', 'chave de idempotência obrigatória');
   const { armazem } = ctx;
@@ -208,16 +265,17 @@ export function atribuirRuas(
 
     // Valida TODAS as ruas antes de gravar qualquer coisa.
     const { pacotes } = pacotesNaOperacao(ctx);
+    const ruaDe = resolvedorDeRua(ctx);
     const porRua = new Map<string, Pacote[]>();
     for (const p of pacotes) {
-      const k = chaveRua(p.dados.rua);
+      const k = ruaDe(p).chave;
       if (chaves.includes(k)) porRua.set(k, [...(porRua.get(k) ?? []), p]);
     }
     const ruasRef: RuaRef[] = [];
     const entram: Pacote[] = [];
     for (const k of chaves) {
       const lista = porRua.get(k) ?? [];
-      const nome = agruparPorRua(lista)[0]?.nome ?? k;
+      const nome = agruparPorRua(lista, ruaDe)[0]?.nome ?? k;
       const deOutro = lista.filter((p) => p.responsavelId !== null && p.responsavelId !== ajudante.id);
       if (deOutro.length > 0) {
         const outro = armazem.ajudantes.porId(deOutro[0].responsavelId!)?.nome ?? 'outro ajudante';
@@ -284,10 +342,11 @@ export function removerRuaDaCarga(
     if (carga.rotaIniciadaEm || carga.finalizadaEm) {
       throw new ErroAplicacao('CARGA_NA_RUA', 'só é possível mexer nas ruas antes de iniciar a rota', 409);
     }
-    const k = chaveRua(entrada.rua);
-    const pacotes = carga.pacoteIds.map((id) => armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p && chaveRua(p.dados.rua) === k);
+    const k = chaveEntrada(entrada.rua);
+    const ruaDe = resolvedorDeRua(ctx);
+    const pacotes = carga.pacoteIds.map((id) => armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p && ruaDe(p).chave === k);
     if (pacotes.length === 0) throw new ErroAplicacao('RUA_FORA_DA_CARGA', 'essa rua não está na carga', 404);
-    const rua: RuaRef = { chave: k, nome: agruparPorRua(pacotes)[0].nome, quantidade: pacotes.length };
+    const rua: RuaRef = { chave: k, nome: agruparPorRua(pacotes, ruaDe)[0].nome, quantidade: pacotes.length };
     const para = entrada.paraAjudanteId ? armazem.ajudantes.porId(entrada.paraAjudanteId) : undefined;
     if (entrada.paraAjudanteId && (!para || !para.ativo)) throw new ErroAplicacao('AJUDANTE_INEXISTENTE', 'ajudante de destino não encontrado', 404);
     if (para?.id === carga.ajudante.id) throw new ErroAplicacao('MESMO_AJUDANTE', 'a rua já está com esse ajudante', 409);
@@ -374,7 +433,7 @@ export function confirmarRepasses(
   }
   const planos = [...porAjudante].map(([ajudanteId, ruas]) => ({ ajudanteId, ruas }));
   if (planos.length === 0) throw new ErroAplicacao('PLANO_VAZIO', 'nenhum repasse planejado');
-  const todas = planos.flatMap((p) => p.ruas.map(chaveRua));
+  const todas = planos.flatMap((p) => p.ruas.map(chaveEntrada));
   if (new Set(todas).size !== todas.length) {
     throw new ErroAplicacao('RUA_REPETIDA_NO_PLANO', 'a mesma rua foi planejada para mais de um ajudante');
   }

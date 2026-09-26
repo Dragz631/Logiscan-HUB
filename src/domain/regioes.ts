@@ -10,11 +10,15 @@
  * O extractor não sabe nada disso — entrega a rua como está no card; quem identifica a região é o HUB.
  */
 
+import { chaveTexto, limparEspacos } from './destino/texto';
+
 export interface Regiao {
   id: string;
   nome: string;
   criadaEm: string;
   criadaPor: string;
+  /** true = no repasse a região inteira vale como UMA rua (ex.: "Diversos"). */
+  repasseUnico: boolean;
 }
 
 export interface Associacao {
@@ -22,6 +26,11 @@ export interface Associacao {
   ruaNome: string;
   /** null = decidido "sem região". */
   regiaoId: string | null;
+  /**
+   * Especificidade DENTRO da região (menor = mais específica). Ex.: na Manilha, "Rua B" (1) é mais
+   * específica que "Rua Leão XIII" (2). null = sem prioridade configurada. É dado, não regra no código.
+   */
+  prioridade: number | null;
   definidaEm: string;
   definidaPor: string;
 }
@@ -57,7 +66,60 @@ export interface EventoRegiao {
   id: string;
   ruaChave: string;
   tipo: 'REGIAO_DEFINIDA';
-  dados: { rua: { chave: string; nome: string }; de: string | null | undefined; para: string | null };
+  dados: {
+    rua: { chave: string; nome: string };
+    de: string | null | undefined;
+    para: string | null;
+    /** Mudança de especificidade (quando houve). */
+    prioridade?: { de: number | null | undefined; para: number | null };
+  };
   ator: string;
   ocorridoEm: string;
+}
+
+// ---------------------------------------------------------------------------
+// Rua operacional (conhecimento configurável de especificidade)
+// ---------------------------------------------------------------------------
+
+
+export interface RuaConhecida {
+  chave: string;
+  nome: string;
+  regiaoId: string | null;
+  prioridade: number | null;
+}
+
+/** Menciona o logradouro como palavras inteiras? ("rua b" não casa com "rua barao"). */
+function menciona(texto: string, chave: string): boolean {
+  return ` ${texto} `.includes(` ${chave} `);
+}
+
+/**
+ * Qual é a RUA OPERACIONAL do pacote, quando a J&T mistura referências.
+ * Regra (toda vinda de DADO configurado):
+ *  - parte da rua escrita no card;
+ *  - se ela é conhecida numa região com prioridade P, e o endereço (rua + complemento) cita outra rua
+ *    conhecida DA MESMA REGIÃO com prioridade MENOR (mais específica), a mais específica vence.
+ *    Ex.: Manilha, "Rua Leão XIII" + complemento "Rua B casa 5" → "Rua B".
+ *  - empate entre duas mais específicas, rua desconhecida ou região diferente → não inventa: fica a do card.
+ * Não mexe em destino (nº/contexto): só decide em qual RUA o pacote é organizado/repassado.
+ */
+export function ruaOperacional(
+  dados: { rua: string; complemento: string },
+  conhecidas: ReadonlyMap<string, RuaConhecida>,
+): { chave: string; nome: string; ajustada: boolean } {
+  const nomeCard = limparEspacos(dados.rua);
+  const chaveCard = chaveTexto(nomeCard);
+  const base = conhecidas.get(chaveCard);
+  if (!base || base.regiaoId === null) return { chave: chaveCard, nome: nomeCard, ajustada: false };
+  const texto = chaveTexto(`${dados.rua} ${dados.complemento}`);
+  const limite = base.prioridade ?? Number.POSITIVE_INFINITY;
+  const candidatas = [...conhecidas.values()].filter(
+    (r) => r.regiaoId === base.regiaoId && r.chave !== base.chave && r.prioridade !== null && r.prioridade < limite && menciona(texto, r.chave),
+  );
+  if (candidatas.length === 0) return { chave: base.chave, nome: nomeCard, ajustada: false };
+  const menor = Math.min(...candidatas.map((r) => r.prioridade!));
+  const vencedoras = candidatas.filter((r) => r.prioridade === menor);
+  if (vencedoras.length !== 1) return { chave: base.chave, nome: nomeCard, ajustada: false }; // conflito: não inventa
+  return { chave: vencedoras[0].chave, nome: vencedoras[0].nome, ajustada: true };
 }

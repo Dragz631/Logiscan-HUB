@@ -18,7 +18,16 @@ import {
   removerRuaDaCarga,
 } from '../src/application/orquestracao';
 import type { Contexto } from '../src/application/portas';
-import { consultorDeRegioes, criarRegiao, definirRegiao } from '../src/application/regioes';
+import {
+  aplicarConhecimentoInicial,
+  consultorDeRegioes,
+  criarRegiao,
+  definirRegiao,
+  mapaDeRegioes,
+} from '../src/application/regioes';
+import { readFileSync } from 'node:fs';
+import { ruaOperacional } from '../src/domain/regioes';
+import { confirmarRecebimento as recebido } from '../src/application/transporteStreet';
 import { cargasDoPerfil, confirmarRecebimento, perfisParaStreet, receberEventosStreet } from '../src/application/transporteStreet';
 import { DocumentoCargaV0 } from '../src/contracts/cargaV0';
 import { reconstruir } from '../src/domain/eventos';
@@ -42,8 +51,8 @@ function operacao() {
   });
   if (!r.ok) throw new Error('import');
   confirmarImportacao(ctx, r.loteId, 'Galpão');
-  const hugo = criarPerfil(ctx, { nome: 'Hugo', veiculo: 'Moto', capacidade: 5 });
-  const ana = criarPerfil(ctx, { nome: 'Ana', capacidade: 30 });
+  const hugo = criarPerfil(ctx, { nome: 'Hugo', veiculo: 'Moto' });
+  const ana = criarPerfil(ctx, { nome: 'Ana' });
   return { ctx, hugo, ana };
 }
 
@@ -122,13 +131,16 @@ describe('regiões (memória operacional do HUB)', () => {
 });
 
 describe('perfis', () => {
-  it('perfil tem veículo e capacidade; capacidade só avisa, não bloqueia', () => {
+  it('12/13. card do ajudante: só pacotes e ruas; nenhuma regra de capacidade/lotação bloqueia', () => {
     const { ctx, hugo } = operacao();
-    expect(hugo).toMatchObject({ nome: 'Hugo', veiculo: 'Moto', capacidade: 5, ativo: true });
+    expect(hugo).toMatchObject({ nome: 'Hugo', veiculo: 'Moto', ativo: true });
+    expect(hugo).not.toHaveProperty('capacidade');
     atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: ['Rua X', 'Rua Carlos Seidl', 'Rua Leão XIII'], ator: 'Galpão', chave: 'k' });
+    atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: ['Rua General Gurjão', 'Travessa X'], ator: 'Galpão', chave: 'k2' }); // muitos pacotes: nada bloqueia
     const p = listarPerfis(ctx).find((x) => x.ajudante.id === hugo.id)!;
-    expect(p).toMatchObject({ pacotes: 6, ruas: 3, excesso: true });
-    expect(editarPerfil(ctx, hugo.id, { nome: 'Hugo S.', capacidade: 10 })).toMatchObject({ nome: 'Hugo S.', capacidade: 10, veiculo: null });
+    expect(p).toMatchObject({ pacotes: 8, ruas: 5 });
+    expect(p).not.toHaveProperty('excesso');
+    expect(editarPerfil(ctx, hugo.id, { nome: 'Hugo S.' })).toMatchObject({ nome: 'Hugo S.', veiculo: null });
   });
 
   it('não dá para desativar perfil com carga ativa', () => {
@@ -356,5 +368,146 @@ describe('repasse em lote (tela Orquestrador de Repasse)', () => {
     const antes = tipos(ctx, 'X1');
     expect(confirmarRepasses(ctx, plano).cargas[0].pacotes).toBe(3);
     expect(tipos(ctx, 'X1')).toEqual(antes);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V0.3 — conhecimento operacional (Manilha configurável, Quinta aprendida, Diversos), carga e perfil
+// ---------------------------------------------------------------------------
+
+const CONHECIMENTO = JSON.parse(readFileSync('src/infrastructure/conhecimento/conhecimento-inicial.json', 'utf8'));
+
+/** Operação com endereços da Manilha misturados como a J&T faz. */
+function operacaoManilha() {
+  const ctx = contextoDeTeste();
+  aplicarConhecimentoInicial(ctx, CONHECIMENTO);
+  const r = prepararImportacao(ctx, {
+    arquivo: 'manilha.json',
+    conteudo: documento([
+      pacote({ tracking_code: 'M1', street: 'Rua Leão XIII', number: '5', complement: 'Rua B casa 5' }, 0), // → Rua B
+      pacote({ tracking_code: 'M2', street: 'Rua B', number: '7' }, 1),
+      pacote({ tracking_code: 'M3', street: 'Rua Leão XIII', number: '24', complement: 'Loja ABC' }, 2), // fica na Leão XIII
+      pacote({ tracking_code: 'M4', street: 'Rua Leão XIII', number: '30', complement: 'Rua B / Rua D fundos' }, 3), // empate: não inventa
+      pacote({ tracking_code: 'F1', street: 'Rua Franco de Almeida', number: '10' }, 4),
+      pacote({ tracking_code: 'F2', street: 'Avenida Brasil', number: '2000' }, 5),
+      pacote({ tracking_code: 'Q1', street: 'Travessa X', number: '20', complement: 'Loja' }, 6),
+    ]),
+  });
+  if (!r.ok) throw new Error('import');
+  confirmarImportacao(ctx, r.loteId, 'Galpão');
+  const hugo = criarPerfil(ctx, { nome: 'Hugo' });
+  const ana = criarPerfil(ctx, { nome: 'Ana' });
+  return { ctx, hugo, ana };
+}
+
+describe('conhecimento operacional configurável', () => {
+  it('Manilha vem do ARQUIVO de conhecimento (14 ruas com prioridade); Quinta do Caju começa vazia; Diversos repassa como uma rua', () => {
+    const { ctx } = operacaoManilha();
+    const { regioes } = mapaDeRegioes(ctx);
+    const manilha = regioes.find((r) => r.nome === 'Manilha')!;
+    expect(manilha.ruas.map((r) => r.nome)).toHaveLength(14);
+    expect(manilha.ruas.find((r) => r.nome === 'Rua B')?.prioridade).toBe(1);
+    expect(manilha.ruas.find((r) => r.nome === 'Rua Leão XIII')?.prioridade).toBe(2);
+    expect(regioes.find((r) => r.nome === 'Quinta do Caju')?.ruas).toEqual([]);
+    expect(regioes.find((r) => r.nome === 'Diversos')).toMatchObject({ repasseUnico: true, ruas: [] });
+  });
+
+  it('aplicar o conhecimento de novo é idempotente e NUNCA sobrescreve decisão do operador', () => {
+    const ctx = contextoDeTeste();
+    const quinta = criarRegiao(ctx, 'Quinta do Caju', 'Hugo');
+    definirRegiao(ctx, { rua: 'Rua do Canal', regiaoId: quinta.id, ator: 'Hugo' }); // decisão do operador (hipotética)
+    const r1 = aplicarConhecimentoInicial(ctx, CONHECIMENTO);
+    expect(r1.conflitos).toEqual(['Rua do Canal: já decidido como Quinta do Caju']);
+    expect(ctx.armazem.regioes.associacao('rua do canal')?.regiaoId).toBe(quinta.id);
+    const r2 = aplicarConhecimentoInicial(ctx, CONHECIMENTO);
+    expect(r2).toMatchObject({ regioesCriadas: [], ruasAssociadas: 0 });
+  });
+
+  it('rua operacional: "Rua Leão XIII" + "Rua B" no endereço → Rua B (mais específica, por DADO de prioridade)', () => {
+    const conhecidas = new Map([
+      ['rua b', { chave: 'rua b', nome: 'Rua B', regiaoId: 'm', prioridade: 1 }],
+      ['rua d', { chave: 'rua d', nome: 'Rua D', regiaoId: 'm', prioridade: 1 }],
+      ['rua leao xiii', { chave: 'rua leao xiii', nome: 'Rua Leão XIII', regiaoId: 'm', prioridade: 2 }],
+    ]);
+    expect(ruaOperacional({ rua: 'Rua Leão XIII', complemento: 'Rua B casa 5' }, conhecidas)).toMatchObject({ chave: 'rua b', ajustada: true });
+    expect(ruaOperacional({ rua: 'Rua Leão XIII', complemento: 'Loja ABC' }, conhecidas)).toMatchObject({ chave: 'rua leao xiii', ajustada: false });
+    // duas mais específicas ao mesmo tempo: conflito → não inventa
+    expect(ruaOperacional({ rua: 'Rua Leão XIII', complemento: 'Rua B / Rua D' }, conhecidas)).toMatchObject({ chave: 'rua leao xiii', ajustada: false });
+    // "rua b" não casa dentro de "rua barao"
+    expect(ruaOperacional({ rua: 'Rua Leão XIII', complemento: 'perto da Rua Barão' }, conhecidas).ajustada).toBe(false);
+  });
+
+  it('1/4. no orquestrador a Manilha aparece como região, com a rua operacional certa', () => {
+    const { ctx } = operacaoManilha();
+    const ruas = listarRuas(ctx);
+    const ruaB = ruas.find((r) => r.chave === 'rua b')!;
+    expect(ruaB).toMatchObject({ nome: 'Rua B', total: 2, regiao: { status: 'conhecida', nome: 'Manilha' } });
+    expect(ruas.find((r) => r.chave === 'rua leao xiii')?.total).toBe(2); // M3 + M4 (empate)
+  });
+
+  it('2/3/4. Quinta do Caju: rua desconhecida → revisão; operador ensina → memória → próxima vez automático', () => {
+    const { ctx } = operacaoManilha();
+    expect(listarRuas(ctx).find((r) => r.chave === 'travessa x')?.regiao).toEqual({ status: 'desconhecida' });
+    const quinta = ctx.armazem.regioes.porNome('Quinta do Caju')!;
+    definirRegiao(ctx, { rua: 'Travessa X', regiaoId: quinta.id, ator: 'Hugo' });
+    const r = prepararImportacao(ctx, { arquivo: 'novo.json', conteudo: documento([pacote({ tracking_code: 'Q2', street: 'TRAVESSA X', number: '8' })], { generated_at: 'x' }) });
+    if (!r.ok) throw new Error('import');
+    confirmarImportacao(ctx, r.loteId, 'Galpão');
+    expect(listarRuas(ctx).find((x) => x.chave === 'travessa x')).toMatchObject({ total: 2, regiao: { status: 'conhecida', nome: 'Quinta do Caju' } });
+  });
+
+  it('6. região (e rua operacional) não altera destino: loja no nº 20 continua loja', () => {
+    const { ctx } = operacaoManilha();
+    const antes = porCodigo(ctx, 'M1').destinoId;
+    definirRegiao(ctx, { rua: 'Travessa X', regiaoId: ctx.armazem.regioes.porNome('Quinta do Caju')!.id, ator: 'Hugo' });
+    expect(porCodigo(ctx, 'Q1').destinoId).toBe('travessa x|20|comercio:loja');
+    expect(porCodigo(ctx, 'M1').destinoId).toBe(antes);
+    expect(porCodigo(ctx, 'M1').dados.rua).toBe('Rua Leão XIII'); // o dado do card não muda
+  });
+
+  it('Diversos: ruas fora da área, ensinadas pelo operador, repassam JUNTAS como uma rua', () => {
+    const { ctx, hugo } = operacaoManilha();
+    const diversos = ctx.armazem.regioes.porNome('Diversos')!;
+    definirRegiao(ctx, { rua: 'Rua Franco de Almeida', regiaoId: diversos.id, ator: 'Hugo' });
+    definirRegiao(ctx, { rua: 'Avenida Brasil', regiaoId: diversos.id, ator: 'Hugo' });
+    const grupo = listarRuas(ctx).find((r) => r.chave === `regiao:${diversos.id}`)!;
+    expect(grupo).toMatchObject({ nome: 'Diversos', total: 2, logradouros: ['Avenida Brasil', 'Rua Franco de Almeida'] });
+    const r = atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: [grupo.chave], ator: 'Galpão', chave: 'd' });
+    expect(r.pacotes).toBe(2);
+    expect([porCodigo(ctx, 'F1'), porCodigo(ctx, 'F2')].every((p) => p.responsavelId === hugo.id)).toBe(true);
+  });
+});
+
+describe('repasse, carga e perfil (V0.3)', () => {
+  it('7/8. uma rua → todos os pacotes; duas ruas → todos os pacotes das duas', () => {
+    const { ctx, hugo, ana } = operacaoManilha();
+    expect(atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: ['rua b'], ator: 'Galpão', chave: 'a' }).pacotes).toBe(2);
+    expect(atribuirRuas(ctx, { ajudanteId: ana.id, ruas: ['rua leao xiii', 'travessa x'], ator: 'Galpão', chave: 'b' }).pacotes).toBe(3);
+  });
+
+  it('17. uma carga pertence a um único ajudante', () => {
+    const { ctx, hugo, ana } = operacaoManilha();
+    const c = atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: ['rua b'], ator: 'Galpão', chave: 'a' }).carga;
+    expect(c.ajudante.id).toBe(hugo.id);
+    expect(() => atribuirRuas(ctx, { ajudanteId: ana.id, ruas: ['rua b'], ator: 'Galpão', chave: 'b' })).toThrow(/com Hugo/);
+    expect(detalharCarga(ctx, c.id).pacotes.every((p) => p.responsavelId === hugo.id)).toBe(true);
+  });
+
+  it('perfil: sem carga → nada a acompanhar; carga fora do Street → sem paradas; carga no Street → sequência de paradas', () => {
+    const { ctx, hugo } = operacaoManilha();
+    expect(detalharPerfil(ctx, hugo.id)).toMatchObject({ carga: null, paradas: [], recebidaNoStreetEm: null });
+    const c = atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: ['rua b', 'rua leao xiii'], ator: 'Galpão', chave: 'a' }).carga;
+    const montada = detalharPerfil(ctx, hugo.id);
+    expect(montada).toMatchObject({ pacotes: 4, ruas: 2, recebidaNoStreetEm: null, paradas: [] });
+    expect(montada.ruasDaCarga.every((r) => r.regiao.status === 'conhecida')).toBe(true);
+    recebido(ctx, { cargaId: c.id, ajudanteId: hugo.id, quantidade: 4 });
+    const noStreet = detalharPerfil(ctx, hugo.id);
+    expect(noStreet.recebidaNoStreetEm).not.toBeNull();
+    expect(noStreet.paradas.map((x) => [x.rua, x.numero, x.pacotes.length])).toEqual([
+      ['Rua B', '5', 1],
+      ['Rua B', '7', 1],
+      ['Rua Leão XIII', '24', 1],
+      ['Rua Leão XIII', '30', 1],
+    ]);
   });
 });

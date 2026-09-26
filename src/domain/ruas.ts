@@ -36,6 +36,8 @@ export interface ResumoRua {
   revisao: number;
   /** Destinos distintos na rua (nº + contexto). */
   destinos: number;
+  /** Como a rua aparece nos cards (útil quando a rua é um grupo, ex.: "Diversos"). */
+  logradouros: string[];
   responsaveis: string[];
   cargaIds: string[];
   estado: EstadoRua;
@@ -58,10 +60,17 @@ export function estadoDaRua(estados: EstadoPacote[]): EstadoRua {
   return 'ATRIBUIDA';
 }
 
-export function agruparPorRua(pacotes: Pacote[]): ResumoRua[] {
+/** Como achar a rua (operacional) de um pacote. Padrão: a rua escrita no card. */
+export type RuaDoPacote = (p: Pacote) => { chave: string; nome: string };
+export const ruaDoCard: RuaDoPacote = (p) => ({ chave: chaveRua(p.dados.rua), nome: limparEspacos(p.dados.rua) });
+
+export function agruparPorRua(pacotes: Pacote[], ruaDe: RuaDoPacote = ruaDoCard): ResumoRua[] {
   const grupos = new Map<string, Pacote[]>();
+  const nomeFixo = new Map<string, string>();
   for (const p of pacotes) {
-    const chave = chaveRua(p.dados.rua);
+    const r = ruaDe(p);
+    const chave = r.chave;
+    if (r.nome && chaveRua(r.nome) !== chaveRua(p.dados.rua)) nomeFixo.set(chave, r.nome); // rua ajustada pelo conhecimento
     if (!chave) continue;
     if (!grupos.has(chave)) grupos.set(chave, []);
     grupos.get(chave)!.push(p);
@@ -69,7 +78,7 @@ export function agruparPorRua(pacotes: Pacote[]): ResumoRua[] {
   return [...grupos].map(([chave, lista]) => {
     const grafias = new Map<string, number>();
     for (const p of lista) grafias.set(limparEspacos(p.dados.rua), (grafias.get(limparEspacos(p.dados.rua)) ?? 0) + 1);
-    const nome = [...grafias].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+    const nome = nomeFixo.get(chave) ?? [...grafias].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
     const conta = (f: (p: Pacote) => boolean) => lista.filter(f).length;
     return {
       chave,
@@ -82,6 +91,7 @@ export function agruparPorRua(pacotes: Pacote[]): ResumoRua[] {
       insucessos: conta((p) => p.estado === 'INSUCESSO'),
       revisao: conta((p) => p.pendencias.length > 0),
       destinos: new Set(lista.map((p) => p.destinoId ?? `sem-destino:${p.id}`)).size,
+      logradouros: [...grafias.keys()].sort((a, b) => a.localeCompare(b, 'pt-BR')),
       responsaveis: [...new Set(lista.map((p) => p.responsavelId).filter((r): r is string => !!r))],
       cargaIds: [...new Set(lista.map((p) => p.cargaId).filter((c): c is string => !!c))],
       estado: estadoDaRua(lista.map((p) => p.estado)),

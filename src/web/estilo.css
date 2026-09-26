@@ -312,3 +312,53 @@ tr.marcada td { background: var(--marcada); }
   border: 1px solid var(--projecao); border-radius: 999px; background: var(--superficie);
 }
 .plano-chips button { border: 0; background: none; padding: 0 0.3rem; color: var(--fraco); line-height: 1; }
+
+/* ---- Repasse por RUA, agrupado por região (V0.3) ------------------------- */
+.grupo-regiao { display: flex; flex-direction: column; gap: 0.35rem; padding-bottom: 0.5rem; }
+.grupo-regiao + .grupo-regiao { border-top: 1px dashed var(--borda); padding-top: 0.6rem; }
+.grupo-topo { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.grupo-topo label { display: flex; gap: 0.45rem; align-items: center; cursor: pointer; }
+.grupo-regiao.a-definir .grupo-topo b { color: var(--alerta); }
+.linha-rua {
+  display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.5rem 0.65rem; cursor: pointer;
+  border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo);
+}
+.linha-rua input[type='checkbox'] { margin-top: 0.2rem; }
+.linha-rua .info { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 0.8rem; gap: 0.1rem; }
+.linha-rua .info b { font-size: 0.95rem; }
+.linha-rua .link-mini { align-self: flex-start; }
+.linha-rua.marcada { border-color: var(--destaque); box-shadow: 0 0 0 1px var(--destaque); background: var(--marcada); }
+.linha-rua.travada { cursor: default; opacity: 0.72; }
+.card-ajudante .contagem { text-align: right; font-size: 0.75rem; color: var(--fraco); line-height: 1.3; }
+.card-ajudante .contagem .qtd { font-size: 1rem; color: var(--texto); }
+
+/* ---- Perfil: sequência de paradas (estilo SafaSanha, só acompanhamento) -- */
+.cartao.vazio { border-style: dashed; }
+.regiao-perfil { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.4rem 0; }
+.regiao-perfil + .regiao-perfil { border-top: 1px dashed var(--borda); }
+.regiao-perfil .rua-perfil { padding-left: 0.6rem; border-left: 2px solid var(--borda); font-size: 0.85rem; }
+.parada { border: 1px solid var(--borda); border-radius: 10px; background: var(--superficie); padding: 0.75rem; }
+.parada-topo { display: flex; gap: 0.7rem; align-items: center; }
+.numero-badge {
+  min-width: 52px; padding: 0.3rem 0.4rem; border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo);
+  display: flex; flex-direction: column; align-items: center; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.numero-badge small { font-size: 0.6rem; color: var(--fraco); font-weight: 600; }
+.parada-titulo { display: flex; flex-direction: column; font-size: 0.82rem; }
+.parada-titulo b { font-size: 0.98rem; }
+.parada-pacotes { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.parada-pacotes li {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; padding: 0.45rem 0.6rem;
+  border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); font-size: 0.85rem;
+}
+.parada-pacotes .chip.codigo { text-decoration: none; }
+.estado-mini.ok { color: var(--ok); background: var(--ok-fundo); border-color: transparent; }
+.estado-mini.pendente { color: var(--alerta); background: var(--alerta-fundo); border-color: transparent; }
+.estado-mini.falha { color: var(--erro); background: var(--erro-fundo); border-color: transparent; }
+.parada-resumo { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; margin-top: 0.5rem; font-size: 0.82rem; }
+
+/* ---- Regiões ------------------------------------------------------------- */
+.grade-regioes { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 0.75rem; margin: 1rem 0; }
+.tabela-regiao { width: 100%; margin: 0.5rem 0; font-size: 0.85rem; }
+.tabela-regiao th, .tabela-regiao td { padding: 0.3rem 0.4rem; }
+.tabela-regiao input.prioridade { width: 4rem; padding: 0.2rem 0.35rem; }

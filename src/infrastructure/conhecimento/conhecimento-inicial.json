@@ -1,0 +1,76 @@
+{
+  "descricao": "Conhecimento operacional INICIAL do LogiScan (regiões do Caju). Aplicado ao abrir o banco, sem sobrescrever decisões já tomadas pelo operador. Editável: prioridade menor = rua mais específica dentro da região. Fonte: Hugo (25/09/2026).",
+  "regioes": [
+    {
+      "nome": "Manilha",
+      "ruas": [
+        {
+          "nome": "Rua A",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua B",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua C",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua D",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua E",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua F",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua G",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua H",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua I",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua J",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua K",
+          "prioridade": 1
+        },
+        {
+          "nome": "Rua do Canal",
+          "prioridade": 2
+        },
+        {
+          "nome": "Rua Leão XIII",
+          "prioridade": 2
+        },
+        {
+          "nome": "Rua Nossa Senhora da Penha",
+          "prioridade": 2
+        }
+      ]
+    },
+    {
+      "nome": "Quinta do Caju",
+      "ruas": []
+    },
+    {
+      "nome": "Diversos",
+      "repasseUnico": true,
+      "observacao": "Ruas fora da área do Caju (ex.: Franco de Almeida, Avenida Brasil). O operador classifica cada uma; no repasse o grupo vale como UMA rua.",
+      "ruas": []
+    }
+  ]
+}

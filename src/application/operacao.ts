@@ -17,7 +17,7 @@ export function cadastrarAjudante(ctx: Contexto, nome: string): Ajudante {
     if (armazem.ajudantes.listar().some((a) => a.nome.toLowerCase() === limpo.toLowerCase())) {
       throw new ErroAplicacao('AJUDANTE_DUPLICADO', `já existe um ajudante chamado ${limpo}`, 409);
     }
-    const a: Ajudante = { id: ctx.ids.novo(), nome: limpo, ativo: true, criadoEm: ctx.relogio.agora(), veiculo: null, capacidade: null };
+    const a: Ajudante = { id: ctx.ids.novo(), nome: limpo, ativo: true, criadoEm: ctx.relogio.agora(), veiculo: null };
     armazem.ajudantes.criar(a);
     return a;
   });
