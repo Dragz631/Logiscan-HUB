@@ -11,17 +11,13 @@ import type { ResultadoAtribuicaoItem } from '../application/operacao';
 import type { Ajudante, Lote } from '../application/portas';
 import type { DecisaoConflito } from '../domain/importacao';
 
-export class ErroApi extends Error {}
+import { requisitar } from './requisicao';
 
-async function chamar<T>(caminho: string, init?: { method?: string; body?: unknown }): Promise<T> {
-  const res = await fetch(`/api${caminho}`, {
-    method: init?.method ?? (init?.body ? 'POST' : 'GET'),
-    headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
-    body: init?.body ? JSON.stringify(init.body) : undefined,
-  });
-  const dados = await res.json().catch(() => ({}));
-  if (!res.ok && res.status !== 422) throw new ErroApi(dados.mensagem ?? `erro ${res.status}`);
-  return dados as T;
+export { ErroApi, TITULO_FALHA, type TipoFalha } from './requisicao';
+
+/** 422 = recusa por CONTRATO: volta como resposta (a tela mostra campo a campo), não como falha de rede/servidor. */
+function chamar<T>(caminho: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  return requisitar<T>(`/api${caminho}`, init, [422]);
 }
 
 export const novaChave = () => crypto.randomUUID();

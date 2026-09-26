@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../api';
+import { ErroApi, TITULO_FALHA, type TipoFalha, api } from '../api';
 import { ir } from '../contexto';
 import { dataHora } from '../formato';
 import { Aviso, useCarregar } from './comum';
@@ -8,19 +8,22 @@ const ROTULO_STATUS = { PREVIA: 'Prévia (não confirmado)', CONFIRMADO: 'Confir
 
 export function Importar() {
   const lotes = useCarregar(() => api.lotes(), []);
-  const [erros, setErros] = useState<string[] | null>(null);
+  // Contrato (o arquivo) ≠ conexão (o HUB não respondeu) ≠ servidor (erro interno) ≠ pedido recusado.
+  const [falha, setFalha] = useState<{ tipo: 'contrato'; erros: string[] } | { tipo: TipoFalha; mensagem: string } | null>(null);
+  const [ultimo, setUltimo] = useState<File | null>(null);
   const [enviando, setEnviando] = useState(false);
 
   async function escolher(arquivo: File | undefined) {
     if (!arquivo) return;
-    setErros(null);
+    setFalha(null);
+    setUltimo(arquivo);
     setEnviando(true);
     try {
       const r = await api.importar(arquivo.name, await arquivo.text());
       if (r.ok) ir(`/importacoes/${r.loteId}${r.jaRecebido ? '?jaRecebido' : ''}`);
-      else setErros(r.erros);
+      else setFalha({ tipo: 'contrato', erros: r.erros });
     } catch (e) {
-      setErros([(e as Error).message]);
+      setFalha(e instanceof ErroApi ? { tipo: e.tipo, mensagem: e.message } : { tipo: 'servidor', mensagem: (e as Error).message });
     } finally {
       setEnviando(false);
     }
@@ -38,15 +41,26 @@ export function Importar() {
         <span>{enviando ? 'Validando…' : 'Escolher arquivo JSON'}</span>
       </label>
 
-      {erros && (
+      {falha?.tipo === 'contrato' && (
         <Aviso>
-          <b>Arquivo recusado: não segue o contrato.</b> Nada foi gravado.
+          <b>Arquivo recusado: não segue o contrato logiscan.import/v0.</b> Nada foi gravado.
           <ul>
-            {erros.slice(0, 20).map((e) => (
+            {falha.erros.slice(0, 20).map((e) => (
               <li key={e}>{e}</li>
             ))}
           </ul>
-          {erros.length > 20 && <p>… e mais {erros.length - 20} erro(s).</p>}
+          {falha.erros.length > 20 && <p>… e mais {falha.erros.length - 20} erro(s).</p>}
+        </Aviso>
+      )}
+      {falha && falha.tipo !== 'contrato' && (
+        <Aviso>
+          <b>{TITULO_FALHA[falha.tipo]}.</b> {falha.tipo === 'conexao' ? 'O arquivo não foi avaliado — o problema não é o JSON.' : 'Nada foi gravado.'}
+          <p className="sem-margem">{falha.mensagem}</p>
+          {ultimo && (
+            <button type="button" onClick={() => escolher(ultimo)}>
+              Tentar de novo
+            </button>
+          )}
         </Aviso>
       )}
 

@@ -229,6 +229,14 @@ export function criarApi(ctx: Contexto): express.Router {
   });
 
   api.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    // Erros do próprio corpo HTTP (antes de qualquer regra): não são erro de contrato nem erro interno.
+    const tipoCorpo = (err as { type?: string } | null)?.type;
+    if (tipoCorpo === 'entity.too.large') {
+      return res.status(413).json({ erro: 'ARQUIVO_GRANDE_DEMAIS', mensagem: 'o arquivo passa do limite de 25 MB aceito pelo HUB' });
+    }
+    if (tipoCorpo === 'entity.parse.failed') {
+      return res.status(400).json({ erro: 'CORPO_INVALIDO', mensagem: 'o pedido chegou corrompido (JSON do corpo inválido)' });
+    }
     if (err instanceof ErroAplicacao) return res.status(err.status).json({ erro: err.codigo, mensagem: err.message });
     if (err instanceof ErroDominio) return res.status(409).json({ erro: err.codigo, mensagem: err.message });
     if (err instanceof z.ZodError) {
