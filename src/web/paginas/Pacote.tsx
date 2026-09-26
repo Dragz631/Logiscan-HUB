@@ -152,6 +152,7 @@ export function PacotePagina({ id }: { id: string }) {
             <time>{dataHora(e.ocorridoEm)}</time>
             <div>
               <b>{e.descricao}</b>
+              {e.aviso && <div className="selo alerta">{e.aviso}</div>}
               <div className="fraco">
                 por {e.ator} · {e.origem}
               </div>

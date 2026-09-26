@@ -362,3 +362,23 @@ tr.marcada td { background: var(--marcada); }
 .tabela-regiao { width: 100%; margin: 0.5rem 0; font-size: 0.85rem; }
 .tabela-regiao th, .tabela-regiao td { padding: 0.3rem 0.4rem; }
 .tabela-regiao input.prioridade { width: 4rem; padding: 0.2rem 0.35rem; }
+
+/* V0.4 — Origem por UNIDADE (região / grupo / rua): resumo primeiro, ruas só ao expandir */
+.card-unidade { border: 1px solid var(--borda); border-radius: 8px; background: var(--fundo); padding: 0.6rem 0.75rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.card-unidade .topo { display: flex; gap: 0.6rem; align-items: flex-start; cursor: pointer; }
+.card-unidade .topo input[type='checkbox'] { margin-top: 0.25rem; }
+.card-unidade > .topo .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; font-size: 0.8rem; }
+.card-unidade > .topo .info > b { font-size: 1rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.card-unidade .acoes-unidade { display: flex; gap: 0.9rem; align-items: center; font-size: 0.8rem; padding-left: 1.6rem; }
+.card-unidade.marcada { border-color: var(--destaque); box-shadow: 0 0 0 1px var(--destaque); background: var(--marcada); }
+.card-unidade.parcial { border-color: var(--destaque); border-style: dashed; }
+.card-unidade.travada .topo { cursor: default; opacity: 0.72; }
+.card-unidade .ruas-da-unidade { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.3rem 0 0.1rem 1.6rem; }
+.card-unidade .logradouros { margin: 0.2rem 0 0 1.6rem; padding-left: 1rem; font-size: 0.8rem; color: var(--fraco); }
+.card-unidade .escolha-regiao { padding-left: 1.6rem; }
+.card-ajudante.fechado .area { opacity: 0.85; }
+.card-ajudante .motivo { margin: 0.35rem 0 0; font-size: 0.78rem; color: var(--alerta); }
+.card-ajudante .acao-rota { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-top: 0.45rem; }
+.chip-ativo { color: var(--ok); border-color: currentColor; font-size: 0.66rem; padding: 0 0.35rem; }
+.chip-inativo { color: var(--erro); border-color: currentColor; font-size: 0.66rem; padding: 0 0.35rem; }
+.timeline .selo.alerta { display: inline-block; margin: 0.2rem 0; white-space: normal; }

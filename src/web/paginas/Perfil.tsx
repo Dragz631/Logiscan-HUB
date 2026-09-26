@@ -17,7 +17,7 @@ import { Aviso, useCarregar } from './comum';
 import { BarraProgresso, ROTULO_SITUACAO_PERFIL } from './Orquestrador';
 
 /** Na sequência de paradas, o que ainda não teve desfecho aparece como "Pendente" (visão do Street). */
-const ROTULO_PARADA: Record<string, string> = { ATRIBUIDO: 'Pendente', EM_ROTA: 'Pendente', ENTREGUE: 'Entregue', INSUCESSO: 'Insucesso' };
+const ROTULO_PARADA: Record<string, string> = { ATRIBUIDO: 'Pendente', EM_ROTA: 'Pendente', ENTREGUE: 'Entrega registrada', INSUCESSO: 'Insucesso' };
 
 const ESTADO_PACOTE_CLS: Record<string, string> = {
   ENTREGUE: 'ok',
@@ -53,6 +53,7 @@ function CartaoParada({ parada }: { parada: Parada }) {
               <b>{p.destinatario || '—'}</b>
               <a className="chip codigo" href={`#/pacotes/${p.id}`}>#{p.codigo.slice(-4)}</a>
               <span className={`chip estado-mini ${ESTADO_PACOTE_CLS[p.estado] ?? ''}`}>{ROTULO_PARADA[p.estado] ?? ROTULO_ESTADO[p.estado]}</span>
+              {p.provaIncompleta && <span className="chip chip-alerta estado-mini" title="Faltam foto do pacote e foto do local">prova incompleta</span>}
               {p.complemento && <span className="fraco">{p.complemento}</span>}
               {p.motivoInsucesso && <span className="alerta-txt">{p.motivoInsucesso}</span>}
             </li>

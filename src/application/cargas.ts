@@ -8,7 +8,7 @@
  *                         de forma idempotente; o que não puder ser aplicado é RECUSADO com motivo.
  *  5. registrarCorrecao : reverte um desfecho com um evento NOVO (o original nunca é apagado).
  */
-import { SCHEMA_CARGA_V0, type DocumentoCargaV0 } from '../contracts/cargaV0';
+import { SCHEMA_CARGA_V0, type DocumentoCargaV0, type ItemCargaV0 } from '../contracts/cargaV0';
 import { lerDocumentoStreetEventos, type EventoStreetV0 } from '../contracts/streetEventosV0';
 import { type Carga, type EventoCarga, type SituacaoCarga, codigoCarga, descreverEventoCarga, prefixoCarga, situacaoCarga } from '../domain/carga';
 import { ErroDominio } from '../domain/eventos';
@@ -16,7 +16,7 @@ import type { EstadoPacote, Pacote } from '../domain/pacote';
 import { ErroAplicacao } from './erros';
 import type { Contexto } from './portas';
 import { type RuaDoPerfil, ruasDaCarga } from './orquestracao';
-import { resolvedorDeRua } from './regioes';
+import { identidadeDaRua, resolvedorDeRua } from './regioes';
 import { registrarEvento } from './registrarEvento';
 
 /** Pacotes que podem entrar numa carga nova do ajudante: com ele, no galpão e fora de outra carga. */
@@ -165,33 +165,48 @@ export function documentoDaCarga(ctx: Contexto, carga: Carga, agora: string): Do
   const pacotes = carga.pacoteIds
     .map((id) => ctx.armazem.pacotes.porId(id))
     .filter((p): p is Pacote => !!p && p.cargaId === carga.id && (p.estado === 'EM_ROTA' || p.estado === 'ATRIBUIDO'));
+  const identidade = identidadeDaRua(ctx);
+  const itens = new Map<string, ItemCargaV0>();
+  const linhas = pacotes.map((p) => {
+    const rua = identidade(p);
+    const item = itens.get(rua.ruaId) ?? {
+      rua_id: rua.ruaId, rua_nome: rua.ruaNome, regiao_id: rua.regiao?.id ?? null, regiao_nome: rua.regiao?.nome ?? null, pacote_ids: [],
+    };
+    item.pacote_ids.push(p.id);
+    itens.set(rua.ruaId, item);
+    return {
+      hub_pacote_id: p.id,
+      transportadora: p.transportadora,
+      codigo: p.codigo,
+      destinatario: p.dados.destinatario,
+      rua: p.dados.rua,
+      rua_detalhe: p.dados.ruaDetalhe,
+      numero: p.dados.numero,
+      complemento: p.dados.complemento,
+      bairro: p.dados.bairro,
+      cidade: p.dados.cidade,
+      uf: p.dados.uf,
+      cep: p.dados.cep,
+      destino_id: p.destinoId,
+      rua_id: rua.ruaId,
+      rua_nome: rua.ruaNome,
+      regiao: rua.regiao ? { id: rua.regiao.id, nome: rua.regiao.nome, repasse_unico: rua.regiao.repasseUnico } : null,
+    };
+  });
   return {
-        schema: SCHEMA_CARGA_V0,
-        gerado_em: agora,
-        carga: {
-          id: carga.id,
-          codigo: carga.codigo,
-          criada_em: carga.criadaEm,
-          criada_por: carga.criadaPor,
-          situacao: carga.rotaIniciadaEm ? 'EM_ROTA' : 'MONTADA',
-          rota_iniciada_em: carga.rotaIniciadaEm,
-        },
-        ajudante: carga.ajudante,
-        pacotes: pacotes.map((p) => ({
-          hub_pacote_id: p.id,
-          transportadora: p.transportadora,
-          codigo: p.codigo,
-          destinatario: p.dados.destinatario,
-          rua: p.dados.rua,
-          rua_detalhe: p.dados.ruaDetalhe,
-          numero: p.dados.numero,
-          complemento: p.dados.complemento,
-          bairro: p.dados.bairro,
-          cidade: p.dados.cidade,
-          uf: p.dados.uf,
-          cep: p.dados.cep,
-          destino_id: p.destinoId,
-        })),
+    schema: SCHEMA_CARGA_V0,
+    gerado_em: agora,
+    carga: {
+      id: carga.id,
+      codigo: carga.codigo,
+      criada_em: carga.criadaEm,
+      criada_por: carga.criadaPor,
+      situacao: carga.rotaIniciadaEm ? 'EM_ROTA' : 'MONTADA',
+      rota_iniciada_em: carga.rotaIniciadaEm,
+    },
+    ajudante: carga.ajudante,
+    pacotes: linhas,
+    itens: [...itens.values()],
   };
 }
 

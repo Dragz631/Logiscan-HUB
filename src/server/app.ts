@@ -33,6 +33,7 @@ import {
   finalizarRota,
   listarPerfis,
   listarRuas,
+  agruparEmUnidades,
   removerRuaDaCarga,
 } from '../application/orquestracao';
 import { criarRegiao, definirRegiao, listarRegioes, mapaDeRegioes } from '../application/regioes';
@@ -96,7 +97,8 @@ export function criarApi(ctx: Contexto): express.Router {
 
   // ---- Orquestrador ----
   api.get('/orquestrador', (_req, res) => {
-    res.json({ ruas: listarRuas(ctx), perfis: listarPerfis(ctx), regioes: listarRegioes(ctx) });
+    const ruas = listarRuas(ctx);
+    res.json({ ruas, unidades: agruparEmUnidades(ruas), perfis: listarPerfis(ctx), regioes: listarRegioes(ctx) });
   });
 
   api.post('/regioes', (req, res) => {

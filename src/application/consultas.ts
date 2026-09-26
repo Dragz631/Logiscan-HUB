@@ -3,6 +3,7 @@
  * quantos entraram, quantos precisam de revisão, quantos sem responsável,
  * quem está com um pacote, qual o status e o que aconteceu com ele.
  */
+import { ROTULO_REQUISITO, avaliarEntrega } from '../domain/confirmacao';
 import { type Destino, rotuloDestino } from '../domain/destinoPacote';
 import { type Evento, descreverEvento } from '../domain/eventos';
 import { ESTADOS, type EstadoPacote, type Pacote, revisaoPendente } from '../domain/pacote';
@@ -68,7 +69,40 @@ export interface DetalhePacote {
   /** Outros pacotes no mesmo destino (identidades próprias, nunca fundidos). */
   mesmoDestino: { id: string; codigo: string; destinatario: string }[];
   lote: { id: string; arquivo: string; extractor: string } | null;
-  timeline: (Evento & { descricao: string })[];
+  timeline: ItemTimeline[];
+}
+
+/** Linha da timeline: eventos do pacote + o que aconteceu com a CARGA dele (ex.: recebida no Street). */
+export type ItemTimeline =
+  /** `aviso`: ex.: entrega registrada com PROVA INCOMPLETA (entregue ≠ pronto para baixa). */
+  | (Evento & { descricao: string; aviso: string | null })
+  | { id: string; tipo: 'RECEBIDA_NO_STREET'; ocorridoEm: string; ator: string; origem: 'street'; descricao: string; aviso: null };
+
+function avisoDoEvento(e: Evento): string | null {
+  if (e.tipo !== 'ENTREGA_REGISTRADA') return null;
+  const c = avaliarEntrega({ recebedor: e.dados.recebedor, ocorridoEm: e.ocorridoEm, provas: { fotoPacote: false, fotoLocal: false } });
+  return c.status === 'COMPLETA' ? null : `PROVA INCOMPLETA — falta: ${c.faltando.map((f) => ROTULO_REQUISITO[f]).join(', ')}. Ainda não está pronto para baixa.`;
+}
+
+/** Timeline do pacote, com o recebimento da carga no Street (1º depois de o pacote entrar na carga). */
+export function timelineDoPacote(ctx: Contexto, pacoteId: string, nomeDestino?: (id: string) => string): ItemTimeline[] {
+  const { armazem } = ctx;
+  const eventos = armazem.eventos.doPacote(pacoteId);
+  const itens: ItemTimeline[] = eventos.map((e) => ({ ...e, descricao: descreverEvento(e, nomeDestino), aviso: avisoDoEvento(e) }));
+  for (const inc of eventos) {
+    if (inc.tipo !== 'INCLUIDO_EM_CARGA') continue;
+    const saida = eventos.find((e) => e.tipo === 'RETIRADO_DA_CARGA' && e.dados.carga.id === inc.dados.carga.id && e.ocorridoEm >= inc.ocorridoEm);
+    const rec = armazem.cargas
+      .eventos(inc.dados.carga.id)
+      .find((e) => e.tipo === 'RECEBIDA_NO_STREET' && e.ocorridoEm >= inc.ocorridoEm && (!saida || e.ocorridoEm <= saida.ocorridoEm));
+    if (rec) {
+      itens.push({
+        id: `carga:${rec.id}`, tipo: 'RECEBIDA_NO_STREET', ocorridoEm: rec.ocorridoEm, ator: rec.ator, origem: 'street',
+        descricao: `Pacote recebido no Street de ${inc.dados.ajudante.nome} (carga ${inc.dados.carga.codigo})`, aviso: null,
+      });
+    }
+  }
+  return itens.sort((a, b) => a.ocorridoEm.localeCompare(b.ocorridoEm));
 }
 
 export function detalharPacote(ctx: Contexto, pacoteId: string): DetalhePacote {
@@ -94,6 +128,6 @@ export function detalharPacote(ctx: Contexto, pacoteId: string): DetalhePacote {
           .map((p) => ({ id: p.id, codigo: p.codigo, destinatario: p.dados.destinatario }))
       : [],
     lote: lote ? { id: lote.id, arquivo: lote.arquivo, extractor: `${lote.extractor.nome} ${lote.extractor.versao}` } : null,
-    timeline: armazem.eventos.doPacote(pacote.id).map((e) => ({ ...e, descricao: descreverEvento(e, nomeDestino) })),
+    timeline: timelineDoPacote(ctx, pacote.id, nomeDestino),
   };
 }

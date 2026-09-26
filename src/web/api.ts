@@ -1,6 +1,6 @@
 /** Cliente da API do HUB. A tela só conversa com o backend por aqui. */
 import type { DetalheCarga, ResultadoRetorno, ResumoCarga } from '../application/cargas';
-import type { DadosPerfil, DetalhePerfil, ResumoPerfil, RuaNoOrquestrador } from '../application/orquestracao';
+import type { DadosPerfil, DetalhePerfil, ResumoPerfil, RuaNoOrquestrador, UnidadeRepasse } from '../application/orquestracao';
 import type { RegiaoComRuas, ResultadoDefinicao } from '../application/regioes';
 import type { Regiao } from '../domain/regioes';
 import type { DocumentoCargaV0 } from '../contracts/cargaV0';
@@ -38,7 +38,7 @@ export const api = {
   criarPerfil: (d: DadosPerfil) => chamar<Ajudante>('/ajudantes', { body: d }),
   editarPerfil: (id: string, d: DadosPerfil) => chamar<Ajudante>(`/ajudantes/${id}`, { method: 'PUT', body: d }),
   perfil: (id: string) => chamar<DetalhePerfil>(`/perfis/${id}`),
-  orquestrador: () => chamar<{ ruas: RuaNoOrquestrador[]; perfis: ResumoPerfil[]; regioes: Regiao[] }>('/orquestrador'),
+  orquestrador: () => chamar<{ ruas: RuaNoOrquestrador[]; unidades: UnidadeRepasse[]; perfis: ResumoPerfil[]; regioes: Regiao[] }>('/orquestrador'),
   criarRegiao: (nome: string, ator: string, repasseUnico = false) => chamar<Regiao>('/regioes', { body: { nome, ator, repasseUnico } }),
   definirRegiao: (rua: string, regiaoId: string | null, ator: string, substituir = false, prioridade?: number | null) =>
     chamar<ResultadoDefinicao>('/regioes/definir', {
@@ -46,7 +46,7 @@ export const api = {
     }),
   mapaRegioes: () => chamar<{ regioes: RegiaoComRuas[]; semRegiao: RegiaoComRuas['ruas'] }>('/regioes'),
   atribuirRuas: (ajudanteId: string, ruas: string[], ator: string) =>
-    chamar<{ carga: { id: string; codigo: string }; pacotes: number }>('/orquestrador/atribuir', {
+    chamar<{ carga: { id: string; codigo: string }; pacotes: number; ruas: { chave: string; nome: string; quantidade: number }[]; deFora: { rua: string; com: string; pacotes: number }[] }>('/orquestrador/atribuir', {
       body: { ajudanteId, ruas, ator, chave: novaChave() },
     }),
   confirmarRepasses: (repasses: { ajudanteId: string; ruas: string[] }[], ator: string) =>

@@ -3,8 +3,9 @@
  * Rua conhecida → região automática. Rua nova → revisão humana; a decisão vira memória persistida.
  * Mudar a região de uma rua já conhecida é CONFLITO: só com confirmação explícita (e fica no histórico).
  */
+import { idLogradouro, partesDoLogradouro, resolverLogradouro } from '../domain/destino/logradouro';
 import type { Pacote } from '../domain/pacote';
-import { type Regiao, type RuaConhecida, decidirAssociacao, resolverRegiao, ruaOperacional, type ResolucaoRegiao } from '../domain/regioes';
+import { type Associacao, type Regiao, type RuaConhecida, decidirAssociacao, resolverRegiao, ruaOperacional, type ResolucaoRegiao } from '../domain/regioes';
 import { chaveRua } from '../domain/ruas';
 import { ErroAplicacao } from './erros';
 import type { Contexto } from './portas';
@@ -33,7 +34,7 @@ export type RegiaoDaRua =
 
 /** Função de consulta usada pelo orquestrador: rua → região (a partir da memória). */
 export function consultorDeRegioes(ctx: Contexto): (ruaChave: string) => RegiaoDaRua {
-  const mapa = ctx.armazem.regioes.associacoes();
+  const mapa = associacoesEfetivas(ctx, nomesDeRuas(ctx));
   const nomes = new Map(ctx.armazem.regioes.listar().map((r) => [r.id, r.nome]));
   return (ruaChave) => {
     // "rua" que é uma região inteira (repasse único, ex.: Diversos)
@@ -140,28 +141,96 @@ export function aplicarConhecimentoInicial(
   });
 }
 
+/** Nomes de logradouro que o HUB já viu: memória de regiões + ruas escritas nos pacotes. */
+function nomesDeRuas(ctx: Contexto): string[] {
+  const nomes = new Set<string>();
+  for (const a of ctx.armazem.regioes.associacoes().values()) nomes.add(a.ruaNome);
+  for (const p of ctx.armazem.pacotes.listar()) if (p.dados.rua.trim()) nomes.add(p.dados.rua);
+  return [...nomes];
+}
+
+/**
+ * Memória rua → região, pela identidade da rua (street_id).
+ * Um nome ensinado SEM tipo ("praia do caju") vale também para o mesmo logradouro escrito COM tipo
+ * ("Rua Praia do Caju") quando a regra segura do `logradouro.ts` encaixa os dois (um único candidato).
+ * Nunca junta nomes diferentes ("Carlos Seidl" ≠ "Carlos Seixas"); região não mexe na identidade.
+ */
+function associacoesEfetivas(ctx: Contexto, nomes: readonly string[]): Map<string, Associacao> {
+  const base = ctx.armazem.regioes.associacoes();
+  const mapa = new Map<string, Associacao>();
+  for (const a of base.values()) mapa.set(idLogradouro(a.ruaNome) || a.ruaChave, a);
+  for (const a of base.values()) {
+    const id = idLogradouro(a.ruaNome);
+    if (partesDoLogradouro(id).tipo !== null) continue;
+    const r = resolverLogradouro(a.ruaNome, nomes);
+    if (r.como === 'sem_tipo' && !mapa.has(r.id)) mapa.set(r.id, { ...a, ruaChave: r.id });
+  }
+  return mapa;
+}
+
 /** Ruas conhecidas (memória do HUB) — base para decidir a rua operacional dos pacotes. */
-export function ruasConhecidas(ctx: Contexto): Map<string, RuaConhecida> {
+export function ruasConhecidas(ctx: Contexto, nomes = nomesDeRuas(ctx)): Map<string, RuaConhecida> {
   return new Map(
-    [...ctx.armazem.regioes.associacoes().values()].map((a) => [
-      a.ruaChave,
-      { chave: a.ruaChave, nome: a.ruaNome, regiaoId: a.regiaoId, prioridade: a.prioridade },
-    ]),
+    [...associacoesEfetivas(ctx, nomes)].map(([chave, a]) => [chave, { chave, nome: a.ruaNome, regiaoId: a.regiaoId, prioridade: a.prioridade }]),
   );
 }
 
 /**
- * "pacote → rua operacional": a MESMA decisão em todas as telas e em todas as atribuições.
- * Rua de uma região de repasse único (ex.: Diversos) vira a própria região: `regiao:<id>`.
+ * Nome escrito no card → logradouro (street_id + nome). Mesmo id = mesma rua; nome sem tipo encaixa
+ * num logradouro com tipo só quando há UM candidato ("PRAIA DO CAJU" → "Rua Praia do Caju").
+ */
+export function resolvedorDeNome(nomes: readonly string[]): (nome: string) => { chave: string; nome: string } {
+  const cache = new Map<string, { chave: string; nome: string }>();
+  return (nome) => {
+    if (!cache.has(nome)) {
+      const r = resolverLogradouro(nome, nomes);
+      cache.set(nome, { chave: r.id, nome: r.nome });
+    }
+    return cache.get(nome)!;
+  };
+}
+
+/** Rua do pacote: identidade (street_id) → especificidade da região; nome = o ensinado na memória, se houver. */
+function ruaDoPacote(
+  p: Pacote,
+  conhecidas: Map<string, RuaConhecida>,
+  nomeDe: (nome: string) => { chave: string; nome: string },
+): { chave: string; nome: string } {
+  const n = nomeDe(p.dados.rua);
+  const rua = n.chave === idLogradouro(p.dados.rua) ? p.dados.rua : n.nome; // sem tipo encaixado: usa o nome com tipo
+  const r = ruaOperacional({ rua, complemento: p.dados.complemento }, conhecidas);
+  return { chave: r.chave, nome: conhecidas.get(r.chave)?.nome ?? r.nome };
+}
+
+/**
+ * "pacote → rua operacional": a MESMA decisão em todas as telas, atribuições e cargas.
+ * 1) identidade do logradouro (street_id); 2) especificidade configurada na região (Manilha: "Rua B" vence
+ * "Rua Leão XIII"); 3) rua de região de repasse único (ex.: Diversos) vira a própria região: `regiao:<id>`.
  */
 export function resolvedorDeRua(ctx: Contexto): (p: Pacote) => { chave: string; nome: string } {
-  const conhecidas = ruasConhecidas(ctx);
+  const nomes = nomesDeRuas(ctx);
+  const conhecidas = ruasConhecidas(ctx, nomes);
+  const nomeDe = resolvedorDeNome(nomes);
   const unicas = new Map(ctx.armazem.regioes.listar().filter((r) => r.repasseUnico).map((r) => [r.id, r.nome]));
   return (p) => {
-    const r = ruaOperacional({ rua: p.dados.rua, complemento: p.dados.complemento }, conhecidas);
+    const r = ruaDoPacote(p, conhecidas, nomeDe);
     const regiaoId = conhecidas.get(r.chave)?.regiaoId;
     if (regiaoId && unicas.has(regiaoId)) return { chave: `regiao:${regiaoId}`, nome: unicas.get(regiaoId)! };
     return r;
+  };
+}
+
+/** Identidade da rua do pacote (street_id), sem o agrupamento de repasse único. Vai na carga para o Street. */
+export function identidadeDaRua(ctx: Contexto): (p: Pacote) => { ruaId: string; ruaNome: string; regiao: { id: string; nome: string; repasseUnico: boolean } | null } {
+  const nomes = nomesDeRuas(ctx);
+  const conhecidas = ruasConhecidas(ctx, nomes);
+  const nomeDe = resolvedorDeNome(nomes);
+  const regioes = new Map(ctx.armazem.regioes.listar().map((r) => [r.id, r]));
+  return (p) => {
+    const r = ruaDoPacote(p, conhecidas, nomeDe);
+    const g = conhecidas.get(r.chave)?.regiaoId;
+    const regiao = g ? regioes.get(g) : undefined;
+    return { ruaId: r.chave, ruaNome: r.nome, regiao: regiao ? { id: regiao.id, nome: regiao.nome, repasseUnico: regiao.repasseUnico } : null };
   };
 }
 

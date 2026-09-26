@@ -10,7 +10,8 @@
  * O extractor não sabe nada disso — entrega a rua como está no card; quem identifica a região é o HUB.
  */
 
-import { chaveTexto, limparEspacos } from './destino/texto';
+import { idLogradouro } from './destino/logradouro';
+import { limparEspacos } from './destino/texto';
 
 export interface Regiao {
   id: string;
@@ -109,10 +110,10 @@ export function ruaOperacional(
   conhecidas: ReadonlyMap<string, RuaConhecida>,
 ): { chave: string; nome: string; ajustada: boolean } {
   const nomeCard = limparEspacos(dados.rua);
-  const chaveCard = chaveTexto(nomeCard);
+  const chaveCard = idLogradouro(nomeCard);
   const base = conhecidas.get(chaveCard);
   if (!base || base.regiaoId === null) return { chave: chaveCard, nome: nomeCard, ajustada: false };
-  const texto = chaveTexto(`${dados.rua} ${dados.complemento}`);
+  const texto = idLogradouro(`${dados.rua} ${dados.complemento}`);
   const limite = base.prioridade ?? Number.POSITIVE_INFINITY;
   const candidatas = [...conhecidas.values()].filter(
     (r) => r.regiaoId === base.regiaoId && r.chave !== base.chave && r.prioridade !== null && r.prioridade < limite && menciona(texto, r.chave),

@@ -84,6 +84,59 @@ export function listarRuas(ctx: Contexto): RuaNoOrquestrador[] {
   return agruparPorRua(pacotesNaOperacao(ctx).pacotes, resolvedorDeRua(ctx)).map((r) => ({ ...r, regiao: regiaoDe(r.chave) }));
 }
 
+/**
+ * UNIDADE DE REPASSE — o card da coluna Origem.
+ *   regiao → várias ruas que se repassam juntas (Manilha, Quinta do Caju); as ruas só aparecem ao expandir;
+ *   grupo  → região de repasse único (Diversos): uma "rua operacional" com vários logradouros dentro;
+ *   rua    → rua sem região: ela própria é o card (sem camada extra).
+ * A unidade só organiza a seleção: a atribuição continua levando RUAS inteiras.
+ */
+export interface UnidadeRepasse {
+  /** `regiao:<id>` para região/grupo; chave da rua (street_id) para rua solta. */
+  chave: string;
+  tipo: 'regiao' | 'grupo' | 'rua';
+  nome: string;
+  regiao: RegiaoDaRua;
+  total: number;
+  disponiveis: number;
+  atribuidos: number;
+  revisao: number;
+  responsaveis: string[];
+  /** Conteúdo ao expandir (grupo: 1 rua operacional, com os logradouros dentro). */
+  ruas: RuaNoOrquestrador[];
+}
+
+export function agruparEmUnidades(ruas: RuaNoOrquestrador[]): UnidadeRepasse[] {
+  const unidades = new Map<string, UnidadeRepasse>();
+  for (const r of ruas) {
+    const grupo = r.chave.startsWith('regiao:');
+    const regiao = !grupo && r.regiao.status === 'conhecida' ? r.regiao : null;
+    const chave = grupo ? r.chave : regiao ? `regiao:${regiao.id}` : r.chave;
+    if (!unidades.has(chave)) {
+      unidades.set(chave, {
+        chave,
+        tipo: grupo ? 'grupo' : regiao ? 'regiao' : 'rua',
+        nome: regiao ? regiao.nome : r.nome,
+        regiao: r.regiao,
+        total: 0, disponiveis: 0, atribuidos: 0, revisao: 0, responsaveis: [], ruas: [],
+      });
+    }
+    const u = unidades.get(chave)!;
+    u.ruas.push(r);
+    u.total += r.total;
+    u.disponiveis += r.disponiveis;
+    u.atribuidos += r.atribuidos;
+    u.revisao += r.revisao;
+    u.responsaveis = [...new Set([...u.responsaveis, ...r.responsaveis])];
+  }
+  const ordem = { regiao: 0, grupo: 0, rua: 1 } as const;
+  return [...unidades.values()].sort((a, b) => ordem[a.tipo] - ordem[b.tipo] || a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+export function listarUnidades(ctx: Contexto): UnidadeRepasse[] {
+  return agruparEmUnidades(listarRuas(ctx));
+}
+
 export interface ResumoPerfil {
   ajudante: Ajudante;
   carga: { id: string; codigo: string; situacao: 'MONTADA' | 'EM_ROTA' | 'CONCLUIDA' } | null;
@@ -94,6 +147,9 @@ export interface ResumoPerfil {
   pendentes: number;
   /** % de pacotes com desfecho. */
   progresso: number;
+  rotaIniciadaEm: string | null;
+  /** Quando o Street do perfil confirmou que carregou a carga (null = ainda não chegou). */
+  recebidaNoStreetEm: string | null;
 }
 
 function resumoPerfil(ctx: Contexto, a: Ajudante, ruaDe = resolvedorDeRua(ctx)): ResumoPerfil {
@@ -111,6 +167,8 @@ function resumoPerfil(ctx: Contexto, a: Ajudante, ruaDe = resolvedorDeRua(ctx)):
     insucessos,
     pendentes: pacotes.length - entregues - insucessos,
     progresso: pacotes.length ? Math.round(((entregues + insucessos) / pacotes.length) * 100) : 0,
+    rotaIniciadaEm: carga?.rotaIniciadaEm ?? null,
+    recebidaNoStreetEm: carga ? (ctx.armazem.cargas.eventos(carga.id).filter((e) => e.tipo === 'RECEBIDA_NO_STREET').at(-1)?.ocorridoEm ?? null) : null,
   };
 }
 
@@ -134,15 +192,12 @@ export interface Parada {
   /** Como aparece no card: "Rua Carlos Seidl, 133 — Loja ABC". */
   titulo: string;
   bairro: string;
-  pacotes: { id: string; codigo: string; destinatario: string; estado: Pacote['estado']; complemento: string; motivoInsucesso: string | null }[];
+  pacotes: { id: string; codigo: string; destinatario: string; estado: Pacote['estado']; complemento: string; motivoInsucesso: string | null; provaIncompleta: boolean }[];
 }
 
 export interface DetalhePerfil extends ResumoPerfil {
   ruasDaCarga: (RuaDoPerfil & { regiao: RegiaoDaRua })[];
-  rotaIniciadaEm: string | null;
   montadaEm: string | null;
-  /** Quando o Street do ajudante recebeu a carga (null = ainda não está no Street). */
-  recebidaNoStreetEm: string | null;
   /** Sequência de paradas — só faz sentido quando a carga já está no Street. */
   paradas: Parada[];
   /** Últimos acontecimentos dos pacotes da carga atual (mais recentes primeiro). */
@@ -177,6 +232,8 @@ export function montarParadas(pacotes: Pacote[], ruaDe: (p: Pacote) => { chave: 
       estado: p.estado,
       complemento: p.dados.complemento,
       motivoInsucesso: p.motivoInsucesso,
+      /** Entregue ≠ pronto para baixa: sem as provas (fotos), a confirmação continua incompleta. */
+      provaIncompleta: p.estado === 'ENTREGUE' && p.confirmacaoEntrega?.status !== 'COMPLETA',
     });
   }
   return [...porDestino.values()].sort(
@@ -226,6 +283,61 @@ export function detalharPerfil(ctx: Contexto, ajudanteId: string): DetalhePerfil
 /** Chave de rua vinda da tela: nome de rua é normalizado; grupo (`regiao:<id>`, ex.: Diversos) passa intacto. */
 const chaveEntrada = (k: string) => (k.startsWith('regiao:') ? k : chaveRua(k));
 
+const livre = (p: Pacote) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO');
+
+/** Rua que ficou fora de uma seleção de REGIÃO inteira, e por quê (sempre dito na tela). */
+export interface RuaDeFora {
+  rua: string;
+  com: string;
+  /** Pacotes da rua que continuam no galpão (a rua não se divide entre dois ajudantes). */
+  pacotes: number;
+}
+
+/**
+ * Selecionar a REGIÃO inteira (`regiao:<id>`) = todas as ruas dela que ainda têm pacote disponível.
+ * Rua já toda com ajudante fica de fora. Rua DIVIDIDA (parte já com OUTRO ajudante) também fica de fora —
+ * uma rua não fica com dois ajudantes — e volta em `deFora` para a tela avisar. Região de repasse único
+ * (Diversos) já é a própria "rua". Rua escolhida sozinha continua recusando com erro (não é silenciosa).
+ */
+function expandirRegiao(
+  ctx: Contexto,
+  chave: string,
+  pacotes: Pacote[],
+  ruaDe: (p: Pacote) => { chave: string; nome: string },
+  ajudanteId: string,
+): { ruas: string[]; deFora: RuaDeFora[] } {
+  if (!chave.startsWith('regiao:')) return { ruas: [chave], deFora: [] };
+  const id = chave.slice('regiao:'.length);
+  const regiao = ctx.armazem.regioes.porId(id);
+  if (!regiao) throw new ErroAplicacao('REGIAO_INEXISTENTE', 'região não encontrada', 404);
+  if (regiao.repasseUnico) return { ruas: [chave], deFora: [] };
+  const regiaoDe = consultorDeRegioes(ctx);
+  const porRua = new Map<string, Pacote[]>();
+  for (const p of pacotes) {
+    const k = ruaDe(p).chave;
+    const r = regiaoDe(k);
+    if (r.status === 'conhecida' && r.id === id) porRua.set(k, [...(porRua.get(k) ?? []), p]);
+  }
+  const ruas: string[] = [];
+  const deFora: RuaDeFora[] = [];
+  for (const [k, lista] of porRua) {
+    const livres = lista.filter(livre).length;
+    if (livres === 0) continue;
+    const outro = lista.find((p) => p.responsavelId !== null && p.responsavelId !== ajudanteId);
+    if (outro) {
+      const noGalpao = lista.filter((p) => livre(p) && p.responsavelId === null).length;
+      deFora.push({ rua: ruaDe(outro).nome, com: ctx.armazem.ajudantes.porId(outro.responsavelId!)?.nome ?? 'outro ajudante', pacotes: noGalpao });
+      continue;
+    }
+    ruas.push(k);
+  }
+  if (ruas.length === 0) {
+    const motivo = deFora.length ? ` (${deFora.map((d) => `${d.rua} já está com ${d.com}`).join('; ')})` : '';
+    throw new ErroAplicacao('REGIAO_SEM_PACOTES', `a região ${regiao.nome} não tem pacotes disponíveis para atribuir${motivo}`, 409);
+  }
+  return { ruas, deFora };
+}
+
 function erroDominio<T>(fn: () => T, codigo?: string): T {
   try {
     return fn();
@@ -242,14 +354,15 @@ function erroDominio<T>(fn: () => T, codigo?: string): T {
 export function atribuirRuas(
   ctx: Contexto,
   entrada: { ajudanteId: string; ruas: string[]; ator: string; chave: string },
-): { carga: Carga; pacotes: number; ruas: RuaRef[] } {
-  const chaves = [...new Set(entrada.ruas.map(chaveEntrada).filter(Boolean))];
-  if (chaves.length === 0) throw new ErroAplicacao('SEM_RUAS', 'selecione ao menos uma rua');
+): { carga: Carga; pacotes: number; ruas: RuaRef[]; deFora: RuaDeFora[] } {
+  const pedidas = [...new Set(entrada.ruas.map(chaveEntrada).filter(Boolean))];
+  if (pedidas.length === 0) throw new ErroAplicacao('SEM_RUAS', 'selecione ao menos uma rua');
   if (!entrada.chave) throw new ErroAplicacao('SEM_CHAVE', 'chave de idempotência obrigatória');
   const { armazem } = ctx;
   return armazem.transacao(() => {
     const ajudante = armazem.ajudantes.porId(entrada.ajudanteId);
-    if (!ajudante || !ajudante.ativo) throw new ErroAplicacao('AJUDANTE_INEXISTENTE', 'ajudante não encontrado ou inativo', 404);
+    if (!ajudante) throw new ErroAplicacao('AJUDANTE_INEXISTENTE', 'ajudante não encontrado', 404);
+    if (!ajudante.ativo) throw new ErroAplicacao('AJUDANTE_INATIVO', `${ajudante.nome} está INATIVO e não recebe repasse: ative o perfil em Ajudantes`, 409);
     const ref = { id: ajudante.id, nome: ajudante.nome };
     const agora = ctx.relogio.agora();
 
@@ -257,15 +370,18 @@ export function atribuirRuas(
     // Retry do mesmo clique (mesma chave): devolve o que já foi feito, sem erro e sem evento novo.
     const feito = carga && armazem.cargas.eventos(carga.id).find((e) => e.tipo === 'RUAS_ADICIONADAS' && e.dados.chave === entrada.chave);
     if (carga && feito && feito.tipo === 'RUAS_ADICIONADAS') {
-      return { carga, pacotes: feito.dados.ruas.reduce((n, r) => n + r.quantidade, 0), ruas: feito.dados.ruas };
+      return { carga, pacotes: feito.dados.ruas.reduce((n, r) => n + r.quantidade, 0), ruas: feito.dados.ruas, deFora: [] };
     }
     if (carga?.rotaIniciadaEm) {
-      throw new ErroAplicacao('JA_EM_ROTA', `${ajudante.nome} já está em rota com a carga ${carga.codigo}: finalize a rota antes de atribuir novas ruas`, 409);
+      throw new ErroAplicacao('JA_EM_ROTA', `${ajudante.nome} já está em rota com a carga ${carga.codigo}: carga em rota é FECHADA (não recebe novas ruas)`, 409);
     }
 
     // Valida TODAS as ruas antes de gravar qualquer coisa.
     const { pacotes } = pacotesNaOperacao(ctx);
     const ruaDe = resolvedorDeRua(ctx);
+    const expandidas = pedidas.map((k) => expandirRegiao(ctx, k, pacotes, ruaDe, ajudante.id));
+    const chaves = [...new Set(expandidas.flatMap((e) => e.ruas))];
+    const deFora = expandidas.flatMap((e) => e.deFora).filter((d) => !chaves.includes(chaveEntrada(d.rua)));
     const porRua = new Map<string, Pacote[]>();
     for (const p of pacotes) {
       const k = ruaDe(p).chave;
@@ -281,7 +397,7 @@ export function atribuirRuas(
         const outro = armazem.ajudantes.porId(deOutro[0].responsavelId!)?.nome ?? 'outro ajudante';
         throw new ErroAplicacao('RUA_DE_OUTRO', `a rua ${nome} tem ${deOutro.length} pacote(s) com ${outro}: uma rua não fica com dois ajudantes`, 409);
       }
-      const livres = lista.filter((p) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO'));
+      const livres = lista.filter(livre);
       if (livres.length === 0) throw new ErroAplicacao('RUA_SEM_PACOTES', `a rua ${nome} não tem pacotes disponíveis para atribuir`, 409);
       ruasRef.push({ chave: k, nome, quantidade: livres.length });
       entram.push(...livres);
@@ -326,7 +442,7 @@ export function atribuirRuas(
       id: ctx.ids.novo(), cargaId: carga.id, tipo: 'RUAS_ADICIONADAS', dados: { ruas: ruasRef, chave: entrada.chave },
       ator: entrada.ator, ocorridoEm: agora, registradoEm: agora,
     });
-    return { carga: armazem.cargas.porId(carga.id)!, pacotes: entram.length, ruas: ruasRef };
+    return { carga: armazem.cargas.porId(carga.id)!, pacotes: entram.length, ruas: ruasRef, deFora };
   });
 }
 

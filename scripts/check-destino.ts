@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 
-const ARQUIVOS = ['texto.ts', 'endereco.ts', 'destino.ts', 'endereco.test.ts'];
+const ARQUIVOS = ['texto.ts', 'endereco.ts', 'destino.ts', 'endereco.test.ts', 'logradouro.ts', 'logradouro.test.ts'];
 const STREET = process.env.STREET_DIR ?? '../SafaSanha/src/domain';
 const hash = (p: string) => createHash('sha256').update(readFileSync(p)).digest('hex');
 

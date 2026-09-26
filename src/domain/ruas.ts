@@ -11,14 +11,15 @@
  * Agrupar por rua nunca mexe no destino: dois locais no mesmo número continuam separados.
  */
 import { ESTADOS_DESFECHO } from './carga';
-import { chaveTexto, limparEspacos } from './destino/texto';
+import { idLogradouro } from './destino/logradouro';
+import { limparEspacos } from './destino/texto';
 import type { EstadoPacote, Pacote } from './pacote';
 
 export type EstadoRua = 'DISPONIVEL' | 'ATRIBUIDA' | 'EM_ROTA' | 'CONCLUIDA';
 
-/** Mesma chave de logradouro do Street/regra de destino (sem acento, minúsculo). */
+/** Chave da rua = street_id (mesma regra do Street: caixa, acento e abreviações seguras; nunca funde nomes diferentes). */
 export function chaveRua(rua: string): string {
-  return chaveTexto(limparEspacos(rua));
+  return idLogradouro(rua);
 }
 
 export interface ResumoRua {
@@ -70,7 +71,7 @@ export function agruparPorRua(pacotes: Pacote[], ruaDe: RuaDoPacote = ruaDoCard)
   for (const p of pacotes) {
     const r = ruaDe(p);
     const chave = r.chave;
-    if (r.nome && chaveRua(r.nome) !== chaveRua(p.dados.rua)) nomeFixo.set(chave, r.nome); // rua ajustada pelo conhecimento
+    if (r.nome && r.nome !== limparEspacos(p.dados.rua)) nomeFixo.set(chave, r.nome); // nome vindo do conhecimento (memória/rua operacional)
     if (!chave) continue;
     if (!grupos.has(chave)) grupos.set(chave, []);
     grupos.get(chave)!.push(p);
