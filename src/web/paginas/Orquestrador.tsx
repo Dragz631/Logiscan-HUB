@@ -7,8 +7,7 @@
  * A rua vai sempre INTEIRA. Sem capacidade/"lotado". Nenhuma regra de negócio aqui: a tela mostra e chama a API.
  */
 import { useMemo, useState } from 'react';
-import type { ResumoPerfil, RuaNoOrquestrador, UnidadeRepasse } from '../../application/orquestracao';
-import type { Regiao } from '../../domain/regioes';
+import type { ResumoPerfil, UnidadeRepasse } from '../../application/orquestracao';
 import { api } from '../api';
 import { useOperador } from '../contexto';
 import { dataHora } from '../formato';
@@ -27,156 +26,71 @@ export function BarraProgresso({ feitos, total }: { feitos: number; total: numbe
   );
 }
 
-const SEM_REGIAO = '__sem';
-const NOVA_REGIAO = '__nova';
-
-/** Escolha de região para uma rua: regiões conhecidas, nova região ou "sem região". */
-function EscolhaRegiao({ r, regioes, onDefinir }: { r: RuaNoOrquestrador; regioes: Regiao[]; onDefinir: (valor: string) => void }) {
-  const [valor, setValor] = useState('');
-  return (
-    <span className="escolha-regiao" onClick={(e) => e.preventDefault()}>
-      <select value={valor} onChange={(e) => setValor(e.target.value)} aria-label={`Região de ${r.nome}`}>
-        <option value="">{r.regiao.status === 'desconhecida' ? 'Qual região?' : 'Mudar região…'}</option>
-        {regioes.map((g) => (
-          <option key={g.id} value={g.id}>{g.nome}{g.repasseUnico ? ' (repasse como uma rua)' : ''}</option>
-        ))}
-        <option value={NOVA_REGIAO}>+ Nova região…</option>
-        <option value={SEM_REGIAO}>Outras ruas do Caju (sem região)</option>
-      </select>
-      <button type="button" disabled={!valor} onClick={() => { onDefinir(valor); setValor(''); }}>
-        Salvar
-      </button>
-    </span>
-  );
-}
-
 const iniciais = (nome: string) =>
   nome.split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]!.toUpperCase()).join('') || '?';
 
 // ---------------------------------------------------------------------------
-// Origem: rua (linha)
+// Origem: CAIXA (card resumido; as ruas de dentro só ao expandir)
 // ---------------------------------------------------------------------------
 
-function LinhaRua({ r, marcada, incluida, nomes, regioes, onAlternar, onDefinirRegiao }: {
-  r: RuaNoOrquestrador;
-  marcada: boolean;
-  /** A região inteira está selecionada: a rua já vai junto. */
-  incluida?: boolean;
-  nomes: Map<string, string>;
-  regioes: Regiao[];
-  onAlternar: () => void;
-  onDefinirRegiao: (valor: string) => void;
-}) {
-  const [mudar, setMudar] = useState(false);
-  const grupo = r.chave.startsWith('regiao:'); // região tratada como uma rua (ex.: Diversos)
-  const selecionavel = r.disponiveis > 0 && !incluida;
-  const com = r.responsaveis.map((id) => nomes.get(id) ?? '?').join(', ');
-  return (
-    <label className={`linha-rua ${marcada || (incluida && r.disponiveis > 0) ? 'marcada' : ''} ${selecionavel || incluida ? '' : 'travada'}`}>
-      <input type="checkbox" checked={marcada || (!!incluida && r.disponiveis > 0)} disabled={!selecionavel} onChange={onAlternar} aria-label={`Selecionar ${r.nome}`} />
-      <div className="info">
-        <b>{r.nome}</b>
-        <span className="fraco">
-          {grupo ? `${r.logradouros.length} logradouro(s): ${r.logradouros.join(', ')}` : `${r.destinos} destino(s)`}
-          {r.atribuidos > 0 && <> · {ROTULO_ESTADO_RUA[r.estado].toLowerCase()} → <b>{com}</b></>}
-          {r.revisao > 0 && <span className="alerta-txt"> · {r.revisao} em revisão</span>}
-        </span>
-        {!grupo && (
-          <button
-            type="button"
-            className={`link-mini ${r.regiao.status === 'desconhecida' ? 'alerta-txt' : ''}`}
-            onClick={(e) => { e.preventDefault(); setMudar(!mudar); }}
-          >
-            {r.regiao.status === 'desconhecida' ? 'definir região' : 'mudar região'}
-          </button>
-        )}
-        {!grupo && mudar && (
-          <EscolhaRegiao r={r} regioes={regioes} onDefinir={(v) => { setMudar(false); onDefinirRegiao(v); }} />
-        )}
-      </div>
-      <span className="qtd grande-qtd" title={r.disponiveis < r.total ? `${r.disponiveis} disponíveis de ${r.total}` : `${r.total} pacote(s)`}>
-        {r.disponiveis > 0 ? r.disponiveis : r.total}
-      </span>
-    </label>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Origem: unidade (card resumido; ruas só ao expandir)
-// ---------------------------------------------------------------------------
+export const rotuloCaixa = (u: { numero: string | null; nome: string }) => (u.numero ? `${u.numero} · ${u.nome}` : u.nome);
 
 function resumoUnidade(u: UnidadeRepasse): string {
   const pac = `${u.total} pacote${u.total === 1 ? '' : 's'}`;
-  if (u.tipo === 'grupo') return `${pac} · 1 rua operacional (${u.ruas[0]?.logradouros.length ?? 0} logradouro(s))`;
-  if (u.tipo === 'regiao') return `${pac} · ${u.ruas.length} rua${u.ruas.length === 1 ? '' : 's'}`;
-  return `${pac} · ${u.ruas[0]?.destinos ?? 0} destino(s)`;
+  if (u.tipo === 'grupo') return `${pac} · ${u.subcaixas.length} caixa${u.subcaixas.length === 1 ? '' : 's'} dentro`;
+  return `${pac} · ${u.ruas.length} rua${u.ruas.length === 1 ? '' : 's'}`;
 }
 
-function CardUnidade({ u, marcadas, nomes, regioes, onAlternar, onDefinirRegiao }: {
+function CardUnidade({ u, marcadas, nomes, onAlternar, dentroDeMarcado = false }: {
   u: UnidadeRepasse;
   marcadas: Set<string>;
   nomes: Map<string, string>;
-  regioes: Regiao[];
   onAlternar: (chave: string) => void;
-  onDefinirRegiao: (r: RuaNoOrquestrador, valor: string) => void;
+  /** O grupo inteiro (Associações) está marcado: esta caixa já vai junto. */
+  dentroDeMarcado?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
-  const [mudar, setMudar] = useState(false);
-  const inteira = marcadas.has(u.chave);
-  const algumaRua = u.tipo === 'regiao' && u.ruas.some((r) => marcadas.has(r.chave));
-  const selecionavel = u.disponiveis > 0;
+  const inteira = marcadas.has(u.chave) || (dentroDeMarcado && u.disponiveis > 0);
+  const algumaSub = u.tipo === 'grupo' && u.subcaixas.some((c) => marcadas.has(c.chave));
+  const selecionavel = u.disponiveis > 0 && !dentroDeMarcado;
   const com = u.responsaveis.map((id) => nomes.get(id) ?? '?').join(', ');
-  const rua = u.tipo === 'rua' ? u.ruas[0] : null;
-  const definir = u.regiao.status === 'desconhecida';
   return (
-    <div className={`card-unidade ${inteira ? 'marcada' : algumaRua ? 'parcial' : ''} ${selecionavel ? '' : 'travada'}`}>
+    <div className={`card-unidade ${inteira ? 'marcada' : algumaSub ? 'parcial' : ''} ${selecionavel || dentroDeMarcado ? '' : 'travada'}`}>
       <label className="topo">
         <input type="checkbox" checked={inteira} disabled={!selecionavel} onChange={() => onAlternar(u.chave)} aria-label={`Selecionar ${u.nome}`} />
         <span className="info">
-          <b>{u.nome}</b>
+          <b>{rotuloCaixa(u)}</b>
           <span className="fraco">
             {resumoUnidade(u)}
             {u.atribuidos > 0 && <> · {u.disponiveis > 0 ? `${u.atribuidos} já com` : 'com'} <b>{com}</b></>}
             {u.revisao > 0 && <span className="alerta-txt"> · {u.revisao} em revisão</span>}
-            {algumaRua && <span className="projecao-txt"> · {u.ruas.filter((r) => marcadas.has(r.chave)).length} rua(s) escolhida(s)</span>}
+            {algumaSub && <span className="projecao-txt"> · {u.subcaixas.filter((c) => marcadas.has(c.chave)).length} caixa(s) escolhida(s)</span>}
           </span>
         </span>
         <span className="qtd grande-qtd" title={`${u.disponiveis} disponíveis de ${u.total}`}>{u.disponiveis > 0 ? u.disponiveis : u.total}</span>
       </label>
       <div className="acoes-unidade">
-        {u.tipo !== 'rua' && (
-          <button type="button" className="link-mini" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>
-            {aberto ? 'Recolher ▴' : u.tipo === 'grupo' ? 'Ver logradouros ▾' : 'Expandir ▾'}
-          </button>
-        )}
-        {rua && (
-          <button type="button" className={`link-mini ${definir ? 'alerta-txt' : ''}`} onClick={() => setMudar(!mudar)}>
-            {definir ? 'região não definida · definir' : 'colocar numa região'}
-          </button>
-        )}
-        {!selecionavel && u.total > 0 && <span className="fraco">sem pacotes disponíveis</span>}
+        <button type="button" className="link-mini" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>
+          {aberto ? 'Recolher ▴' : u.tipo === 'grupo' ? 'Ver as caixas ▾' : 'Expandir ▾'}
+        </button>
+        {!selecionavel && !dentroDeMarcado && u.total > 0 && <span className="fraco">sem pacotes disponíveis</span>}
       </div>
-      {rua && mudar && <EscolhaRegiao r={rua} regioes={regioes} onDefinir={(v) => { setMudar(false); onDefinirRegiao(rua, v); }} />}
-      {aberto && u.tipo === 'regiao' && (
-        <div className="ruas-da-unidade">
+      {aberto && u.tipo === 'caixa' && (
+        <ul className="logradouros">
           {u.ruas.map((r) => (
-            <LinhaRua
-              key={r.chave}
-              r={r}
-              marcada={marcadas.has(r.chave)}
-              incluida={inteira}
-              nomes={nomes}
-              regioes={regioes}
-              onAlternar={() => onAlternar(r.chave)}
-              onDefinirRegiao={(v) => onDefinirRegiao(r, v)}
-            />
+            <li key={r.chave}>
+              {r.nome} — <b className="qtd">{r.total}</b>
+              {r.atribuidos > 0 && <span className="fraco"> · {r.atribuidos} com {r.responsaveis.map((id) => nomes.get(id) ?? '?').join(', ')}</span>}
+            </li>
           ))}
-        </div>
+        </ul>
       )}
       {aberto && u.tipo === 'grupo' && (
-        <ul className="logradouros">
-          {u.ruas[0]?.logradouros.map((l) => <li key={l}>{l}</li>)}
-        </ul>
+        <div className="subcaixas">
+          {u.subcaixas.map((c) => (
+            <CardUnidade key={c.chave} u={c} marcadas={marcadas} nomes={nomes} onAlternar={onAlternar} dentroDeMarcado={marcadas.has(u.chave)} />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -189,7 +103,7 @@ function CardUnidade({ u, marcadas, nomes, regioes, onAlternar, onDefinirRegiao 
 /** Por que o ajudante não pode receber repasse agora (null = pode). Motivo sempre explícito na tela. */
 function motivoBloqueio(p: ResumoPerfil): string | null {
   if (!p.ajudante.ativo) return 'Inativo — não recebe repasse. Ative o perfil em Ajudantes.';
-  if (p.carga?.situacao === 'EM_ROTA') return `Em rota com ${p.carga.codigo} desde ${dataHora(p.rotaIniciadaEm)} — carga fechada, não recebe novas ruas.`;
+  if (p.carga?.situacao === 'EM_ROTA') return `Em rota com ${p.carga.codigo} desde ${dataHora(p.rotaIniciadaEm)} — carga fechada, não recebe novas caixas.`;
   if (p.carga?.situacao === 'CONCLUIDA') return `Rota concluída (${p.carga.codigo}) — finalize a carga no perfil para receber novas ruas.`;
   return null;
 }
@@ -207,7 +121,7 @@ function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciar
   const montada = p.carga?.situacao === 'MONTADA';
   return (
     <div className={`card-ajudante ${escolhido ? 'com-plano' : ''} ${bloqueio ? (a.ativo ? 'fechado' : 'travado') : ''}`}>
-      <button type="button" className="area" disabled={!!bloqueio} onClick={onEscolher} aria-pressed={escolhido}>
+      <button type="button" className="area" disabled={!!bloqueio} onClick={onEscolher} aria-pressed={escolhido} aria-label={`Escolher ${a.nome}: ${p.pacotes} pacotes, ${p.caixas} caixa(s)`}>
         <span className="avatar" aria-hidden="true">{iniciais(a.nome)}</span>
         <span className="quem">
           <b>{a.nome}</b>
@@ -219,7 +133,7 @@ function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciar
         <span className="contagem">
           <b className="qtd">{p.pacotes}</b> pacotes
           <br />
-          <b className="qtd">{p.ruas}</b> ruas
+          <b className="qtd">{p.caixas}</b> caixa{p.caixas === 1 ? '' : 's'}
         </span>
       </button>
       {p.pacotes > 0 && <BarraProgresso feitos={p.entregues + p.insucessos} total={p.pacotes} />}
@@ -253,10 +167,11 @@ function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciar
 // Tela
 // ---------------------------------------------------------------------------
 
-const casa = (termo: string, u: UnidadeRepasse) =>
+const casa = (termo: string, u: UnidadeRepasse): boolean =>
   !termo ||
-  u.nome.toLowerCase().includes(termo) ||
-  u.ruas.some((r) => r.nome.toLowerCase().includes(termo) || r.logradouros.some((l) => l.toLowerCase().includes(termo)));
+  rotuloCaixa(u).toLowerCase().includes(termo) ||
+  u.ruas.some((r) => r.nome.toLowerCase().includes(termo) || r.logradouros.some((l) => l.toLowerCase().includes(termo))) ||
+  u.subcaixas.some((c) => casa(termo, c));
 
 export function Orquestrador() {
   const { exigir } = useOperador();
@@ -272,12 +187,11 @@ export function Orquestrador() {
 
   const unidades = dados.dados?.unidades ?? [];
   const perfis = dados.dados?.perfis ?? [];
-  const regioes = dados.dados?.regioes ?? [];
   const nomes = useMemo(() => new Map(perfis.map((p) => [p.ajudante.id, p.ajudante.nome])), [perfis]);
   const termo = busca.trim().toLowerCase();
   const visiveis = unidades.filter((u) => (!soDisponiveis || u.disponiveis > 0) && casa(termo, u));
 
-  // O que está selecionado: unidades inteiras e/ou ruas avulsas de uma região (sem contar pacote duas vezes).
+  // O que está selecionado: caixas inteiras, ou o grupo (Associações) / sub-caixas dele — sem contar pacote duas vezes.
   const selecao = useMemo(() => {
     let pacotes = 0;
     const nomesSel: string[] = [];
@@ -287,8 +201,7 @@ export function Orquestrador() {
         nomesSel.push(u.nome);
         continue;
       }
-      if (u.tipo !== 'regiao') continue;
-      for (const r of u.ruas) if (marcadas.has(r.chave)) { pacotes += r.disponiveis; nomesSel.push(r.nome); }
+      for (const c of u.subcaixas) if (marcadas.has(c.chave)) { pacotes += c.disponiveis; nomesSel.push(c.nome); }
     }
     return { pacotes, nomes: nomesSel };
   }, [unidades, marcadas]);
@@ -301,42 +214,19 @@ export function Orquestrador() {
       ? { txt: 'Lote confirmado', cls: '' }
       : { txt: 'Sem lote', cls: '' };
 
-  /** Selecionar a região inteira tira as ruas avulsas dela (e vice-versa): nada entra duas vezes. */
+  /** Marcar o grupo inteiro tira as sub-caixas avulsas dele (e vice-versa): nada entra duas vezes. */
   const alternar = (chave: string) => {
     const s = new Set(marcadas);
-    const unidade = unidades.find((u) => u.chave === chave);
+    const grupo = unidades.find((u) => u.chave === chave && u.tipo === 'grupo');
     if (s.has(chave)) s.delete(chave);
     else {
       s.add(chave);
-      if (unidade) unidade.ruas.forEach((r) => r.chave !== chave && s.delete(r.chave));
-      const dona = unidades.find((u) => u.tipo === 'regiao' && u.chave !== chave && u.ruas.some((r) => r.chave === chave));
-      if (dona) s.delete(dona.chave);
+      grupo?.subcaixas.forEach((c) => s.delete(c.chave));
+      const dono = unidades.find((u) => u.subcaixas.some((c) => c.chave === chave));
+      if (dono) s.delete(dono.chave);
     }
     setMarcadas(s);
   };
-
-  async function definirRegiao(r: RuaNoOrquestrador, valor: string) {
-    const ator = exigir();
-    if (!ator) return;
-    try {
-      let regiaoId: string | null = valor === SEM_REGIAO ? null : valor;
-      if (valor === NOVA_REGIAO) {
-        const nome = prompt(`Nome da nova região para ${r.nome}:`)?.trim();
-        if (!nome) return;
-        regiaoId = (await api.criarRegiao(nome, ator)).id;
-      }
-      let res = await api.definirRegiao(r.nome, regiaoId, ator);
-      if (!res.ok) {
-        const para = regiaoId ? (regioes.find((g) => g.id === regiaoId)?.nome ?? 'a nova região') : 'sem região';
-        if (!confirm(`${res.conflito.rua} já está em "${res.conflito.atual.nome}". Mudar para "${para}"? (fica registrado no histórico)`)) return;
-        res = await api.definirRegiao(r.nome, regiaoId, ator, true);
-      }
-      setMsg({ tipo: 'ok', texto: `${r.nome}: região salva na memória do HUB. Da próxima vez, é automático.` });
-      dados.recarregar();
-    } catch (e) {
-      setMsg({ tipo: 'erro', texto: (e as Error).message });
-    }
-  }
 
   async function entregar() {
     const ator = exigir();
@@ -345,11 +235,11 @@ export function Orquestrador() {
     try {
       const r = await api.atribuirRuas(perfilDestino.ajudante.id, [...marcadas], ator);
       const fora = r.deFora.length
-        ? ` Ficou de fora (uma rua não fica com dois ajudantes): ${r.deFora.map((d) => `${d.rua} — ${d.pacotes} pacote(s) continua(m) no galpão, a rua já está com ${d.com}`).join('; ')}.`
+        ? ` Ficou de fora (uma caixa não fica com dois ajudantes): ${r.deFora.map((d) => `${d.rua} — ${d.pacotes} pacote(s) continua(m) no galpão, a caixa já está com ${d.com}`).join('; ')}.`
         : '';
       setMsg({
         tipo: r.deFora.length ? 'info' : 'ok',
-        texto: `${r.ruas.length} rua(s), ${r.pacotes} pacote(s) → ${perfilDestino.ajudante.nome} na carga ${r.carga.codigo} (MONTADA). Quando estiver pronto, clique em INICIAR ROTA no card dele.${fora}`,
+        texto: `${r.ruas.length} caixa(s), ${r.pacotes} pacote(s) → ${perfilDestino.ajudante.nome} na carga ${r.carga.codigo} (MONTADA). Quando estiver pronto, clique em INICIAR ROTA no card dele.${fora}`,
       });
       setMarcadas(new Set());
       dados.recarregar();
@@ -363,7 +253,7 @@ export function Orquestrador() {
   async function iniciarRota(p: ResumoPerfil) {
     const ator = exigir();
     if (!ator || !p.carga) return;
-    if (!confirm(`Confirmar início da rota de ${p.ajudante.nome}?\n\nCarga ${p.carga.codigo}: ${p.pacotes} pacote(s), ${p.ruas} rua(s).\nDepois de iniciar, a carga fica FECHADA (não recebe nem perde ruas).`)) return;
+    if (!confirm(`Confirmar início da rota de ${p.ajudante.nome}?\n\nCarga ${p.carga.codigo}: ${p.pacotes} pacote(s), ${p.caixas} caixa(s).\nDepois de iniciar, a carga fica FECHADA (não recebe nem perde caixas).`)) return;
     setIniciando(p.ajudante.id);
     try {
       const r = await api.iniciarRota(p.carga.id, ator);
@@ -410,6 +300,17 @@ export function Orquestrador() {
 
       {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
       {dados.erro && <Aviso>{dados.erro}</Aviso>}
+      {(dados.dados?.aguardandoRevisao.pacotes ?? 0) > 0 && (
+        <Aviso tipo="info">
+          <span className="aviso-revisao">
+            <span>
+              <b>{dados.dados!.aguardandoRevisao.pacotes} pacote(s)</b> de {dados.dados!.aguardandoRevisao.ruas} rua(s) esperando sua revisão: o HUB
+              ainda não sabe a caixa deles, então eles não vão para ajudante.
+            </span>
+            <a href="#/triagem">Revisar na Triagem →</a>
+          </span>
+        </Aviso>
+      )}
 
       <div className="orquestrador">
         <div className="coluna painel">
@@ -434,9 +335,7 @@ export function Orquestrador() {
                 u={u}
                 marcadas={marcadas}
                 nomes={nomes}
-                regioes={regioes}
                 onAlternar={alternar}
-                onDefinirRegiao={definirRegiao}
               />
             ))}
             {dados.dados && visiveis.length === 0 && (

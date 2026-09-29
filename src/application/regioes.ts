@@ -3,7 +3,8 @@
  * Rua conhecida → região automática. Rua nova → revisão humana; a decisão vira memória persistida.
  * Mudar a região de uma rua já conhecida é CONFLITO: só com confirmação explícita (e fica no histórico).
  */
-import { idLogradouro, partesDoLogradouro, resolverLogradouro } from '../domain/destino/logradouro';
+import { type OrigemCaixa, chavePessoa, decidirCaixa } from '../domain/caixas';
+import { idLogradouro, nomeQuaseIgual, normalizarCep, partesDoLogradouro, resolverLogradouro } from '../domain/destino/logradouro';
 import type { Pacote } from '../domain/pacote';
 import { type Associacao, type Regiao, type RuaConhecida, decidirAssociacao, resolverRegiao, ruaOperacional, type ResolucaoRegiao } from '../domain/regioes';
 import { chaveRua } from '../domain/ruas';
@@ -17,7 +18,7 @@ export function criarRegiao(ctx: Contexto, nome: string, ator: string, repasseUn
   return armazem.transacao(() => {
     const existente = armazem.regioes.porNome(limpo);
     if (existente) return existente;
-    const r: Regiao = { id: ctx.ids.novo(), nome: limpo, criadaEm: ctx.relogio.agora(), criadaPor: ator, repasseUnico };
+    const r: Regiao = { id: ctx.ids.novo(), nome: limpo, criadaEm: ctx.relogio.agora(), criadaPor: ator, repasseUnico, numero: null, ordem: null, paiId: null };
     armazem.regioes.criar(r);
     return r;
   });
@@ -34,7 +35,7 @@ export type RegiaoDaRua =
 
 /** Função de consulta usada pelo orquestrador: rua → região (a partir da memória). */
 export function consultorDeRegioes(ctx: Contexto): (ruaChave: string) => RegiaoDaRua {
-  const mapa = associacoesEfetivas(ctx, nomesDeRuas(ctx));
+  const mapa = associacoesEfetivas(ctx, ruasVistas(ctx).nomes);
   const nomes = new Map(ctx.armazem.regioes.listar().map((r) => [r.id, r.nome]));
   return (ruaChave) => {
     // "rua" que é uma região inteira (repasse único, ex.: Diversos)
@@ -102,30 +103,113 @@ export function definirRegiao(
 // Conhecimento inicial (arquivo de dados) e rua operacional
 // ---------------------------------------------------------------------------
 
+/**
+ * Catálogo de CAIXAS (arquivo editável `conhecimento-inicial.json`): a lista de caixas que o Hugo ditou,
+ * com número, nome, agrupamento (Associações agrupa as 4 associações), ruas explícitas e nomes antigos
+ * (para absorver as regiões que ele já tinha criado sem duplicar). Formato antigo (`regioes`) continua aceito.
+ */
+export interface CaixaDoCatalogo {
+  numero?: string;
+  nome: string;
+  nomesAnteriores?: string[];
+  /** Número da caixa que agrupa esta (ex.: "10" para as associações). */
+  dentroDe?: string;
+  repasseUnico?: boolean;
+  ruas?: { nome: string; prioridade?: number | null }[];
+}
+
 export interface ConhecimentoInicial {
-  regioes: { nome: string; repasseUnico?: boolean; ruas: { nome: string; prioridade?: number | null }[] }[];
+  caixas?: CaixaDoCatalogo[];
+  /** Formato da V0.3 (sem número): continua aceito. */
+  regioes?: { nome: string; repasseUnico?: boolean; ruas: { nome: string; prioridade?: number | null }[] }[];
+}
+
+/** Quem grava o que vem do catálogo (e como o HUB sabe que um nome de rua é o OFICIAL). */
+export const ATOR_CATALOGO = 'conhecimento inicial';
+
+/** "1" → 1, "1.2" → 1.02, "10.1" → 10.01: ordem das caixas como o Hugo numera. */
+export function ordemDoNumero(numero: string): number {
+  const [a, b] = numero.split('.');
+  return Number(a) + (b ? Number(b) / 100 : 0);
 }
 
 /**
- * Aplica o conhecimento inicial (ex.: Manilha e suas 14 ruas; Quinta do Caju vazia).
- * Idempotente e CONSERVADOR: cria o que falta e nunca sobrescreve uma decisão já tomada pelo operador.
- * O que ficou de fora por conflito volta na lista, para revisão.
+ * Aplica o catálogo. Idempotente e CONSERVADOR: cria a caixa que falta, dá número/nome/agrupamento às
+ * regiões que já existiam (pelo nome atual ou por um nome antigo) e associa as ruas explícitas.
+ * Nunca muda a caixa de uma rua que o operador já decidiu diferente — isso volta como conflito.
+ * Toda mudança de nome/número/agrupamento fica no histórico (CAIXA_CONFIGURADA).
  */
 export function aplicarConhecimentoInicial(
   ctx: Contexto,
   conhecimento: ConhecimentoInicial,
-  ator = 'conhecimento inicial',
-): { regioesCriadas: string[]; ruasAssociadas: number; conflitos: string[] } {
+  ator = ATOR_CATALOGO,
+): { regioesCriadas: string[]; ruasAssociadas: number; conflitos: string[]; caixasConfiguradas: string[] } {
   const { armazem } = ctx;
+  const caixas: CaixaDoCatalogo[] = conhecimento.caixas ?? (conhecimento.regioes ?? []).map((r) => ({ ...r }));
   return armazem.transacao(() => {
     const regioesCriadas: string[] = [];
     const conflitos: string[] = [];
+    const caixasConfiguradas: string[] = [];
     let ruasAssociadas = 0;
-    for (const r of conhecimento.regioes) {
-      const existia = armazem.regioes.porNome(r.nome);
-      const regiao = existia ?? criarRegiao(ctx, r.nome, ator, !!r.repasseUnico);
-      if (!existia) regioesCriadas.push(regiao.nome);
-      for (const rua of r.ruas) {
+    const agora = ctx.relogio.agora();
+    const porNumero = new Map<string, Regiao>();
+
+    const configurar = (atual: Regiao, para: { nome: string; numero: string | null; ordem: number | null; paiId: string | null; repasseUnico: boolean }) => {
+      const muda =
+        atual.nome !== para.nome || atual.numero !== para.numero || atual.ordem !== para.ordem || atual.paiId !== para.paiId || atual.repasseUnico !== para.repasseUnico;
+      if (!muda) return atual;
+      armazem.regioes.configurarCaixa(atual.id, para);
+      armazem.regioes.anexarEvento({
+        id: ctx.ids.novo(),
+        ruaChave: `caixa:${atual.id}`,
+        tipo: 'CAIXA_CONFIGURADA',
+        dados: {
+          caixa: atual.id,
+          de: { nome: atual.nome, numero: atual.numero, paiId: atual.paiId },
+          para: { nome: para.nome, numero: para.numero, paiId: para.paiId },
+        },
+        ator,
+        ocorridoEm: agora,
+      });
+      caixasConfiguradas.push(para.numero ? `${para.numero} ${para.nome}` : para.nome);
+      return { ...atual, ...para };
+    };
+
+    // 1ª passada: cada caixa existe, com nome e número do catálogo.
+    for (const c of caixas) {
+      const nome = c.nome.replace(/\s+/g, ' ').trim();
+      const existente =
+        armazem.regioes.porNome(nome) ?? (c.nomesAnteriores ?? []).map((n) => armazem.regioes.porNome(n)).find((r): r is Regiao => !!r);
+      const numero = c.numero ?? existente?.numero ?? null;
+      const ordem = c.numero ? ordemDoNumero(c.numero) : (existente?.ordem ?? null);
+      let regiao: Regiao;
+      if (!existente) {
+        regiao = {
+          id: ctx.ids.novo(), nome, criadaEm: agora, criadaPor: ator, repasseUnico: !!c.repasseUnico, numero, ordem, paiId: null,
+        };
+        armazem.regioes.criar(regiao);
+        regioesCriadas.push(nome);
+      } else {
+        // nome do catálogo só entra se não for de OUTRA região (nunca funde duas regiões)
+        const outra = armazem.regioes.porNome(nome);
+        const nomeFinal = outra && outra.id !== existente.id ? existente.nome : nome;
+        regiao = configurar(existente, {
+          nome: nomeFinal, numero, ordem, paiId: existente.paiId, repasseUnico: c.repasseUnico ?? existente.repasseUnico,
+        });
+      }
+      if (numero) porNumero.set(numero, regiao);
+    }
+
+    // 2ª passada: agrupamento (Associações → as 4 associações) e ruas explícitas.
+    for (const c of caixas) {
+      const regiao = (c.numero && porNumero.get(c.numero)) || armazem.regioes.porNome(c.nome);
+      if (!regiao) continue;
+      if (c.dentroDe !== undefined) {
+        const pai = porNumero.get(c.dentroDe) ?? null;
+        const atual = armazem.regioes.porId(regiao.id)!;
+        if (pai && atual.paiId !== pai.id) configurar(atual, { nome: atual.nome, numero: atual.numero, ordem: atual.ordem, paiId: pai.id, repasseUnico: atual.repasseUnico });
+      }
+      for (const rua of c.ruas ?? []) {
         const atual = armazem.regioes.associacao(chaveRua(rua.nome));
         if (atual && atual.regiaoId !== regiao.id) {
           const onde = atual.regiaoId ? (armazem.regioes.porId(atual.regiaoId)?.nome ?? '?') : 'sem região';
@@ -137,16 +221,89 @@ export function aplicarConhecimentoInicial(
         if (res.ok && res.mudou) ruasAssociadas++;
       }
     }
-    return { regioesCriadas, ruasAssociadas, conflitos };
+    return { regioesCriadas, ruasAssociadas, conflitos, caixasConfiguradas };
   });
 }
 
-/** Nomes de logradouro que o HUB já viu: memória de regiões + ruas escritas nos pacotes. */
-function nomesDeRuas(ctx: Contexto): string[] {
+// ---------------------------------------------------------------------------
+// Identidade da rua (street_id) com o CEP tirando a dúvida de digitação
+// ---------------------------------------------------------------------------
+
+/** O que o HUB já viu de ruas: nomes, CEPs de cada rua, e quais nomes são OFICIAIS (catálogo) ou ensinados. */
+export interface RuasVistas {
+  nomes: string[];
+  cepsPorId: Map<string, Set<string>>;
+  /** Nomes do catálogo de caixas (o certo, ex.: "Manoel"). */
+  catalogo: string[];
+  /** Nomes ensinados pelo operador (memória). */
+  memoria: string[];
+}
+
+export function ruasVistas(ctx: Contexto): RuasVistas {
   const nomes = new Set<string>();
-  for (const a of ctx.armazem.regioes.associacoes().values()) nomes.add(a.ruaNome);
-  for (const p of ctx.armazem.pacotes.listar()) if (p.dados.rua.trim()) nomes.add(p.dados.rua);
-  return [...nomes];
+  const catalogo: string[] = [];
+  const memoria: string[] = [];
+  const cepsPorId = new Map<string, Set<string>>();
+  for (const a of ctx.armazem.regioes.associacoes().values()) {
+    nomes.add(a.ruaNome);
+    (a.definidaPor === ATOR_CATALOGO ? catalogo : memoria).push(a.ruaNome);
+  }
+  for (const p of ctx.armazem.pacotes.listar()) {
+    if (!p.dados.rua.trim()) continue;
+    nomes.add(p.dados.rua);
+    const cep = normalizarCep(p.dados.cep);
+    if (!cep) continue;
+    const id = idLogradouro(p.dados.rua);
+    if (!cepsPorId.has(id)) cepsPorId.set(id, new Set());
+    cepsPorId.get(id)!.add(cep);
+  }
+  return { nomes: [...nomes], cepsPorId, catalogo, memoria };
+}
+
+/**
+ * Nome escrito no card (+ CEP) → logradouro (street_id + nome certo). Em ordem:
+ *  1. identidade da escrita (caixa, acento, abreviação; sem tipo → único com tipo);
+ *  2. nome do CATÁLOGO: igual, ou quase igual com o MESMO CEP (erro de digitação: "Manuel" → "Manoel");
+ *  3. nome ENSINADO: igual, ou quase igual com o mesmo CEP;
+ *  4. senão, fica como veio (rua nova → triagem).
+ * O CEP sozinho nunca junta ruas (um CEP cobre várias no Caju) e nome parecido com CEP diferente é outra rua.
+ */
+export function resolvedorDeNome(v: RuasVistas): (nome: string, cep?: string) => { chave: string; nome: string } {
+  const cache = new Map<string, { chave: string; nome: string }>();
+  const idsCatalogo = new Map(v.catalogo.map((n) => [idLogradouro(n), n]));
+  const idsMemoria = new Map(v.memoria.map((n) => [idLogradouro(n), n]));
+  return (nome, cep = '') => {
+    const k = `${nome}|${cep}`;
+    if (!cache.has(k)) {
+      const r = resolverLogradouro(nome, v.nomes);
+      const c = normalizarCep(cep);
+      const comTipo = partesDoLogradouro(r.id).tipo !== null;
+      // nunca troca um nome COM tipo por um SEM tipo ("Rua Praia do Caju" não vira "praia do caju")
+      const porCep = (lista: string[]) =>
+        c
+          ? lista.find(
+              (o) =>
+                idLogradouro(o) !== r.id &&
+                !(comTipo && partesDoLogradouro(idLogradouro(o)).tipo === null) &&
+                nomeQuaseIgual(r.nome, o) &&
+                v.cepsPorId.get(idLogradouro(o))?.has(c),
+            )
+          : undefined;
+      let res: { chave: string; nome: string };
+      if (idsCatalogo.has(r.id)) res = { chave: r.id, nome: idsCatalogo.get(r.id)! };
+      else {
+        const doCatalogo = porCep(v.catalogo);
+        if (doCatalogo) res = { chave: idLogradouro(doCatalogo), nome: doCatalogo };
+        else if (idsMemoria.has(r.id)) res = { chave: r.id, nome: r.nome };
+        else {
+          const ensinado = porCep(v.memoria);
+          res = ensinado ? { chave: idLogradouro(ensinado), nome: ensinado } : { chave: r.id, nome: r.nome };
+        }
+      }
+      cache.set(k, res);
+    }
+    return cache.get(k)!;
+  };
 }
 
 /**
@@ -169,68 +326,91 @@ function associacoesEfetivas(ctx: Contexto, nomes: readonly string[]): Map<strin
 }
 
 /** Ruas conhecidas (memória do HUB) — base para decidir a rua operacional dos pacotes. */
-export function ruasConhecidas(ctx: Contexto, nomes = nomesDeRuas(ctx)): Map<string, RuaConhecida> {
+export function ruasConhecidas(ctx: Contexto, nomes = ruasVistas(ctx).nomes): Map<string, RuaConhecida> {
   return new Map(
     [...associacoesEfetivas(ctx, nomes)].map(([chave, a]) => [chave, { chave, nome: a.ruaNome, regiaoId: a.regiaoId, prioridade: a.prioridade }]),
   );
 }
 
-/**
- * Nome escrito no card → logradouro (street_id + nome). Mesmo id = mesma rua; nome sem tipo encaixa
- * num logradouro com tipo só quando há UM candidato ("PRAIA DO CAJU" → "Rua Praia do Caju").
- */
-export function resolvedorDeNome(nomes: readonly string[]): (nome: string) => { chave: string; nome: string } {
-  const cache = new Map<string, { chave: string; nome: string }>();
-  return (nome) => {
-    if (!cache.has(nome)) {
-      const r = resolverLogradouro(nome, nomes);
-      cache.set(nome, { chave: r.id, nome: r.nome });
-    }
-    return cache.get(nome)!;
-  };
+type NomeDe = (nome: string, cep?: string) => { chave: string; nome: string };
+
+/** Identidade da rua do pacote (nome certo, antes da especificidade da região). */
+function identidadeDoNome(p: Pacote, nomeDe: NomeDe): { chave: string; nome: string } {
+  return nomeDe(p.dados.rua, p.dados.cep);
 }
 
-/** Rua do pacote: identidade (street_id) → especificidade da região; nome = o ensinado na memória, se houver. */
-function ruaDoPacote(
-  p: Pacote,
-  conhecidas: Map<string, RuaConhecida>,
-  nomeDe: (nome: string) => { chave: string; nome: string },
-): { chave: string; nome: string } {
-  const n = nomeDe(p.dados.rua);
-  const rua = n.chave === idLogradouro(p.dados.rua) ? p.dados.rua : n.nome; // sem tipo encaixado: usa o nome com tipo
+/** Rua do pacote: identidade (street_id + CEP) → especificidade da região; nome = o ensinado, se houver. */
+function ruaDoPacote(p: Pacote, conhecidas: Map<string, RuaConhecida>, nomeDe: NomeDe): { chave: string; nome: string } {
+  const n = identidadeDoNome(p, nomeDe);
+  const rua = n.chave === idLogradouro(p.dados.rua) ? p.dados.rua : n.nome; // encaixada (sem tipo / digitação): usa o nome certo
   const r = ruaOperacional({ rua, complemento: p.dados.complemento }, conhecidas);
   return { chave: r.chave, nome: conhecidas.get(r.chave)?.nome ?? r.nome };
 }
 
-/**
- * "pacote → rua operacional": a MESMA decisão em todas as telas, atribuições e cargas.
- * 1) identidade do logradouro (street_id); 2) especificidade configurada na região (Manilha: "Rua B" vence
- * "Rua Leão XIII"); 3) rua de região de repasse único (ex.: Diversos) vira a própria região: `regiao:<id>`.
- */
+/** "pacote → rua": a MESMA decisão em todas as telas (identidade + CEP + especificidade da Manilha). */
 export function resolvedorDeRua(ctx: Contexto): (p: Pacote) => { chave: string; nome: string } {
-  const nomes = nomesDeRuas(ctx);
-  const conhecidas = ruasConhecidas(ctx, nomes);
-  const nomeDe = resolvedorDeNome(nomes);
-  const unicas = new Map(ctx.armazem.regioes.listar().filter((r) => r.repasseUnico).map((r) => [r.id, r.nome]));
+  const v = ruasVistas(ctx);
+  const conhecidas = ruasConhecidas(ctx, v.nomes);
+  const nomeDe = resolvedorDeNome(v);
+  return (p) => ruaDoPacote(p, conhecidas, nomeDe);
+}
+
+// ---------------------------------------------------------------------------
+// Pacote → CAIXA (a triagem)
+// ---------------------------------------------------------------------------
+
+export interface CaixaDoPacote {
+  /** null = sem caixa: aguarda a revisão do Hugo na triagem. */
+  caixa: Regiao | null;
+  origem: OrigemCaixa | null;
+  /** Rua de verdade do pacote (para listar dentro da caixa). */
+  rua: { chave: string; nome: string };
+  /** Chave da pessoa (nome + rua) — memória por pessoa. */
+  pessoa: string;
+}
+
+/**
+ * Em qual caixa cada pacote está: à mão (triagem) > memória da PESSOA (nome + rua) > memória da RUA.
+ * Sem nenhuma: sem caixa (triagem). Nunca chuta.
+ */
+export function resolvedorDeCaixa(ctx: Contexto): (p: Pacote) => CaixaDoPacote {
+  const v = ruasVistas(ctx);
+  const conhecidas = ruasConhecidas(ctx, v.nomes);
+  const nomeDe = resolvedorDeNome(v);
+  const regioes = new Map(ctx.armazem.regioes.listar().map((r) => [r.id, r]));
+  const pessoas = ctx.armazem.pessoas.todas();
+  const agrupa = new Set([...regioes.values()].map((r) => r.paiId).filter((id): id is string => !!id));
+  const existe = (id: string) => regioes.has(id) && !agrupa.has(id); // caixa que só agrupa não recebe pacote
   return (p) => {
-    const r = ruaDoPacote(p, conhecidas, nomeDe);
-    const regiaoId = conhecidas.get(r.chave)?.regiaoId;
-    if (regiaoId && unicas.has(regiaoId)) return { chave: `regiao:${regiaoId}`, nome: unicas.get(regiaoId)! };
-    return r;
+    const ident = identidadeDoNome(p, nomeDe);
+    const rua = ruaDoPacote(p, conhecidas, nomeDe);
+    const pessoa = chavePessoa(p.dados.destinatario, ident.chave);
+    const d = decidirCaixa({
+      manual: p.caixaId,
+      pessoa: pessoa ? (pessoas.get(pessoa)?.caixaId ?? null) : null,
+      rua: conhecidas.get(rua.chave)?.regiaoId ?? null,
+      existe,
+    });
+    return { caixa: d ? regioes.get(d.caixaId)! : null, origem: d?.origem ?? null, rua, pessoa };
   };
 }
 
-/** Identidade da rua do pacote (street_id), sem o agrupamento de repasse único. Vai na carga para o Street. */
-export function identidadeDaRua(ctx: Contexto): (p: Pacote) => { ruaId: string; ruaNome: string; regiao: { id: string; nome: string; repasseUnico: boolean } | null } {
-  const nomes = nomesDeRuas(ctx);
-  const conhecidas = ruasConhecidas(ctx, nomes);
-  const nomeDe = resolvedorDeNome(nomes);
-  const regioes = new Map(ctx.armazem.regioes.listar().map((r) => [r.id, r]));
+/** Identidade da rua do pacote (street_id) + caixa. Vai na carga para o Street. */
+export function identidadeDaRua(ctx: Contexto): (p: Pacote) => {
+  ruaId: string;
+  ruaNome: string;
+  regiao: { id: string; nome: string; repasseUnico: boolean } | null;
+  caixa: Regiao | null;
+} {
+  const caixaDe = resolvedorDeCaixa(ctx);
   return (p) => {
-    const r = ruaDoPacote(p, conhecidas, nomeDe);
-    const g = conhecidas.get(r.chave)?.regiaoId;
-    const regiao = g ? regioes.get(g) : undefined;
-    return { ruaId: r.chave, ruaNome: r.nome, regiao: regiao ? { id: regiao.id, nome: regiao.nome, repasseUnico: regiao.repasseUnico } : null };
+    const c = caixaDe(p);
+    return {
+      ruaId: c.rua.chave,
+      ruaNome: c.rua.nome,
+      regiao: c.caixa ? { id: c.caixa.id, nome: c.caixa.nome, repasseUnico: c.caixa.repasseUnico } : null,
+      caixa: c.caixa,
+    };
   };
 }
 

@@ -82,6 +82,8 @@ export interface Pacote {
   responsavelId: string | null;
   /** Carga do pacote (montada ou na rua). null = no galpão, fora de carga. */
   cargaId: string | null;
+  /** Caixa decidida À MÃO na triagem (evento CAIXA_DEFINIDA). null = a caixa vem da memória (pessoa/rua). */
+  caixaId: string | null;
   /** Só com estado ENTREGUE: o que falta para a entrega ser considerada confirmada (baixa). */
   confirmacaoEntrega: ConfirmacaoEntrega | null;
   /** Só com estado INSUCESSO: motivo do último insucesso (o histórico guarda todos). */

@@ -5,6 +5,7 @@
 import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
+import type { EventoPessoa, MemoriaPessoa } from '../domain/caixas';
 import type { Evento } from '../domain/eventos';
 import type { DecisaoConflito, ItemPrevia } from '../domain/importacao';
 import type { EstadoPacote, Pacote } from '../domain/pacote';
@@ -120,6 +121,17 @@ export interface RepositorioRegioes {
   definir(a: Associacao): void;
   anexarEvento(e: EventoRegiao): void;
   eventos(ruaChave: string): EventoRegiao[];
+  /** Nome/número/agrupamento da caixa (catálogo). */
+  configurarCaixa(id: string, c: { nome: string; numero: string | null; ordem: number | null; paiId: string | null; repasseUnico: boolean }): void;
+}
+
+/** Memória por PESSOA (nome + rua → caixa). */
+export interface RepositorioPessoas {
+  todas(): Map<string, MemoriaPessoa>;
+  porChave(chave: string): MemoriaPessoa | undefined;
+  definir(m: MemoriaPessoa): void;
+  anexarEvento(e: EventoPessoa): void;
+  eventos(chave: string): EventoPessoa[];
 }
 
 /** Tudo que precisa ser gravado junto, numa transação. */
@@ -131,6 +143,7 @@ export interface Armazem {
   ajudantes: RepositorioAjudantes;
   cargas: RepositorioCargas;
   regioes: RepositorioRegioes;
+  pessoas: RepositorioPessoas;
   transacao<T>(fn: () => T): T;
 }
 

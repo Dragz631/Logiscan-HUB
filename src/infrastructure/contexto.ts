@@ -20,8 +20,11 @@ export function criarContexto(caminhoBanco: string): Contexto {
     readFileSync(new URL('./conhecimento/conhecimento-inicial.json', import.meta.url), 'utf8'),
   ) as ConhecimentoInicial;
   const r = aplicarConhecimentoInicial(ctx, conhecimento);
-  if (r.regioesCriadas.length || r.ruasAssociadas) {
-    console.log(`HUB: conhecimento inicial aplicado — regiões novas: ${r.regioesCriadas.join(', ') || 'nenhuma'}; ruas associadas: ${r.ruasAssociadas}.`);
+  if (r.regioesCriadas.length || r.ruasAssociadas || r.caixasConfiguradas.length) {
+    console.log(
+      `HUB: catálogo de caixas aplicado — caixas novas: ${r.regioesCriadas.join(', ') || 'nenhuma'}; ` +
+        `caixas configuradas: ${r.caixasConfiguradas.join(', ') || 'nenhuma'}; ruas associadas: ${r.ruasAssociadas}.`,
+    );
   }
   if (r.conflitos.length) console.log(`HUB: conhecimento inicial NÃO aplicado (decisão do operador mantida): ${r.conflitos.join('; ')}`);
   return ctx;

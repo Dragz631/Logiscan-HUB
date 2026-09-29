@@ -10,13 +10,14 @@
  *  - toda mudança gera evento (atribuição, inclusão, retirada, reatribuição, início/fim de rota).
  */
 import { type Carga, type RuaRef, codigoCarga, prefixoCarga } from '../domain/carga';
-import { ErroDominio, type Evento } from '../domain/eventos';
+import { type CaixaRef, ErroDominio, type Evento } from '../domain/eventos';
+import type { Regiao } from '../domain/regioes';
 import type { Pacote } from '../domain/pacote';
 import { type ResumoRua, agruparPorRua, chaveRua, naOperacao } from '../domain/ruas';
 import { ErroAplicacao } from './erros';
 import type { Ajudante, Contexto } from './portas';
 import { registrarEvento } from './registrarEvento';
-import { type RegiaoDaRua, consultorDeRegioes, resolvedorDeRua } from './regioes';
+import { type RegiaoDaRua, consultorDeRegioes, resolvedorDeCaixa, resolvedorDeRua } from './regioes';
 
 // ---------------------------------------------------------------------------
 // Perfis
@@ -78,23 +79,50 @@ function pacotesNaOperacao(ctx: Contexto): { pacotes: Pacote[]; ativas: Set<stri
 
 export type RuaNoOrquestrador = ResumoRua & { regiao: RegiaoDaRua };
 
-/** Ruas da operação, cada uma com a região vinda da memória do HUB (desconhecida = revisão). */
+/** Referência da caixa gravada nos eventos (prova de em qual caixa o pacote saiu). */
+export const refCaixa = (c: Regiao): CaixaRef => ({ id: c.id, numero: c.numero, nome: c.nome });
+
+/**
+ * Chave de REPASSE do pacote: a CAIXA dele (`regiao:<id>`). Sem caixa → `sem:<rua>`: não vai para
+ * ajudante nenhum até o Hugo dizer a caixa na triagem.
+ */
+export function resolvedorDeUnidade(ctx: Contexto): (p: Pacote) => { chave: string; nome: string; caixa: Regiao | null; rua: { chave: string; nome: string } } {
+  const caixaDe = resolvedorDeCaixa(ctx);
+  const cache = new Map<string, ReturnType<ReturnType<typeof resolvedorDeUnidade>>>();
+  return (p) => {
+    const k = `${p.id}|${p.versao}`;
+    if (!cache.has(k)) {
+      const c = caixaDe(p);
+      cache.set(
+        k,
+        c.caixa
+          ? { chave: `regiao:${c.caixa.id}`, nome: c.caixa.nome, caixa: c.caixa, rua: c.rua }
+          : { chave: `sem:${c.rua.chave}`, nome: c.rua.nome, caixa: null, rua: c.rua },
+      );
+    }
+    return cache.get(k)!;
+  };
+}
+
+/** Linhas do orquestrador: uma por CAIXA (e as ruas ainda sem caixa, que aguardam a triagem). */
 export function listarRuas(ctx: Contexto): RuaNoOrquestrador[] {
   const regiaoDe = consultorDeRegioes(ctx);
-  return agruparPorRua(pacotesNaOperacao(ctx).pacotes, resolvedorDeRua(ctx)).map((r) => ({ ...r, regiao: regiaoDe(r.chave) }));
+  return agruparPorRua(pacotesNaOperacao(ctx).pacotes, resolvedorDeUnidade(ctx)).map((r) => ({
+    ...r,
+    regiao: r.chave.startsWith('regiao:') ? regiaoDe(r.chave) : { status: 'desconhecida' as const },
+  }));
 }
 
 /**
- * UNIDADE DE REPASSE — o card da coluna Origem.
- *   regiao → várias ruas que se repassam juntas (Manilha, Quinta do Caju); as ruas só aparecem ao expandir;
- *   grupo  → região de repasse único (Diversos): uma "rua operacional" com vários logradouros dentro;
- *   rua    → rua sem região: ela própria é o card (sem camada extra).
- * A unidade só organiza a seleção: a atribuição continua levando RUAS inteiras.
+ * UNIDADE DE REPASSE = CAIXA (o card da coluna Origem).
+ *   caixa → uma rua (Carlos Seidl), um lugar com ruas dentro (Manilha, Quinta) ou uma associação;
+ *   grupo → caixa que agrupa outras (Associações: as 4 associações), dá para mandar inteira ou só uma.
+ * A caixa vai INTEIRA para o ajudante. As ruas de dentro só aparecem ao expandir (informação).
  */
 export interface UnidadeRepasse {
-  /** `regiao:<id>` para região/grupo; chave da rua (street_id) para rua solta. */
   chave: string;
-  tipo: 'regiao' | 'grupo' | 'rua';
+  tipo: 'caixa' | 'grupo';
+  numero: string | null;
   nome: string;
   regiao: RegiaoDaRua;
   total: number;
@@ -102,39 +130,65 @@ export interface UnidadeRepasse {
   atribuidos: number;
   revisao: number;
   responsaveis: string[];
-  /** Conteúdo ao expandir (grupo: 1 rua operacional, com os logradouros dentro). */
+  /** Ruas de verdade dentro da caixa (ao expandir). */
   ruas: RuaNoOrquestrador[];
+  /** Só no grupo: as caixas que ele agrupa. */
+  subcaixas: UnidadeRepasse[];
 }
 
-export function agruparEmUnidades(ruas: RuaNoOrquestrador[]): UnidadeRepasse[] {
-  const unidades = new Map<string, UnidadeRepasse>();
-  for (const r of ruas) {
-    const grupo = r.chave.startsWith('regiao:');
-    const regiao = !grupo && r.regiao.status === 'conhecida' ? r.regiao : null;
-    const chave = grupo ? r.chave : regiao ? `regiao:${regiao.id}` : r.chave;
-    if (!unidades.has(chave)) {
-      unidades.set(chave, {
-        chave,
-        tipo: grupo ? 'grupo' : regiao ? 'regiao' : 'rua',
-        nome: regiao ? regiao.nome : r.nome,
-        regiao: r.regiao,
-        total: 0, disponiveis: 0, atribuidos: 0, revisao: 0, responsaveis: [], ruas: [],
-      });
-    }
-    const u = unidades.get(chave)!;
-    u.ruas.push(r);
-    u.total += r.total;
-    u.disponiveis += r.disponiveis;
-    u.atribuidos += r.atribuidos;
-    u.revisao += r.revisao;
-    u.responsaveis = [...new Set([...u.responsaveis, ...r.responsaveis])];
-  }
-  const ordem = { regiao: 0, grupo: 0, rua: 1 } as const;
-  return [...unidades.values()].sort((a, b) => ordem[a.tipo] - ordem[b.tipo] || a.nome.localeCompare(b.nome, 'pt-BR'));
-}
+const ordemCaixa = (a: { ordem: number | null; nome: string }, b: { ordem: number | null; nome: string }) =>
+  (a.ordem ?? Number.MAX_SAFE_INTEGER) - (b.ordem ?? Number.MAX_SAFE_INTEGER) || a.nome.localeCompare(b.nome, 'pt-BR');
 
 export function listarUnidades(ctx: Contexto): UnidadeRepasse[] {
-  return agruparEmUnidades(listarRuas(ctx));
+  const unidadeDe = resolvedorDeUnidade(ctx);
+  const regioes = new Map(ctx.armazem.regioes.listar().map((r) => [r.id, r]));
+  const porCaixa = new Map<string, Pacote[]>();
+  for (const p of pacotesNaOperacao(ctx).pacotes) {
+    const u = unidadeDe(p);
+    if (u.caixa) porCaixa.set(u.caixa.id, [...(porCaixa.get(u.caixa.id) ?? []), p]);
+  }
+  const caixa = (c: Regiao, lista: Pacote[]): UnidadeRepasse => {
+    const [r] = agruparPorRua(lista, () => ({ chave: `regiao:${c.id}`, nome: c.nome }));
+    const regiao: RegiaoDaRua = { status: 'conhecida', id: c.id, nome: c.nome };
+    return {
+      chave: `regiao:${c.id}`, tipo: 'caixa', numero: c.numero, nome: c.nome, regiao,
+      total: r.total, disponiveis: r.disponiveis, atribuidos: r.atribuidos, revisao: r.revisao, responsaveis: r.responsaveis,
+      ruas: agruparPorRua(lista, (p) => unidadeDe(p).rua).map((x) => ({ ...x, regiao })),
+      subcaixas: [],
+    };
+  };
+  const soltas: UnidadeRepasse[] = [];
+  const grupos = new Map<string, UnidadeRepasse>();
+  for (const [id, lista] of porCaixa) {
+    const c = regioes.get(id)!;
+    const u = caixa(c, lista);
+    const pai = c.paiId ? regioes.get(c.paiId) : undefined;
+    if (!pai) {
+      soltas.push(u);
+      continue;
+    }
+    if (!grupos.has(pai.id)) {
+      grupos.set(pai.id, {
+        chave: `regiao:${pai.id}`, tipo: 'grupo', numero: pai.numero, nome: pai.nome, regiao: { status: 'conhecida', id: pai.id, nome: pai.nome },
+        total: 0, disponiveis: 0, atribuidos: 0, revisao: 0, responsaveis: [], ruas: [], subcaixas: [],
+      });
+    }
+    const g = grupos.get(pai.id)!;
+    g.subcaixas.push(u);
+    g.total += u.total;
+    g.disponiveis += u.disponiveis;
+    g.atribuidos += u.atribuidos;
+    g.revisao += u.revisao;
+    g.responsaveis = [...new Set([...g.responsaveis, ...u.responsaveis])];
+  }
+  const dados = (u: UnidadeRepasse) => regioes.get(u.chave.slice('regiao:'.length))!;
+  for (const g of grupos.values()) g.subcaixas.sort((a, b) => ordemCaixa(dados(a), dados(b)));
+  return [...soltas, ...grupos.values()].sort((a, b) => ordemCaixa(dados(a), dados(b)));
+}
+
+/** Compatibilidade: unidades a partir de linhas já agrupadas (usado só por quem já tem as linhas). */
+export function agruparEmUnidades(_ruas: RuaNoOrquestrador[], ctx?: Contexto): UnidadeRepasse[] {
+  return ctx ? listarUnidades(ctx) : [];
 }
 
 export interface ResumoPerfil {
@@ -142,6 +196,8 @@ export interface ResumoPerfil {
   carga: { id: string; codigo: string; situacao: 'MONTADA' | 'EM_ROTA' | 'CONCLUIDA' } | null;
   pacotes: number;
   ruas: number;
+  /** Quantas caixas o ajudante leva. */
+  caixas: number;
   entregues: number;
   insucessos: number;
   pendentes: number;
@@ -152,7 +208,7 @@ export interface ResumoPerfil {
   recebidaNoStreetEm: string | null;
 }
 
-function resumoPerfil(ctx: Contexto, a: Ajudante, ruaDe = resolvedorDeRua(ctx)): ResumoPerfil {
+function resumoPerfil(ctx: Contexto, a: Ajudante, unidadeDe = resolvedorDeUnidade(ctx)): ResumoPerfil {
   const carga = ctx.armazem.cargas.ativaDoAjudante(a.id) ?? null;
   const pacotes = carga ? carga.pacoteIds.map((id) => ctx.armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p) : [];
   const entregues = pacotes.filter((p) => p.estado === 'ENTREGUE').length;
@@ -162,7 +218,8 @@ function resumoPerfil(ctx: Contexto, a: Ajudante, ruaDe = resolvedorDeRua(ctx)):
     ajudante: a,
     carga: carga && situacao ? { id: carga.id, codigo: carga.codigo, situacao } : null,
     pacotes: pacotes.length,
-    ruas: new Set(pacotes.map((p) => ruaDe(p).chave)).size,
+    ruas: new Set(pacotes.map((p) => unidadeDe(p).rua.chave)).size,
+    caixas: new Set(pacotes.map((p) => unidadeDe(p).chave)).size,
     entregues,
     insucessos,
     pendentes: pacotes.length - entregues - insucessos,
@@ -173,8 +230,8 @@ function resumoPerfil(ctx: Contexto, a: Ajudante, ruaDe = resolvedorDeRua(ctx)):
 }
 
 export function listarPerfis(ctx: Contexto): ResumoPerfil[] {
-  const ruaDe = resolvedorDeRua(ctx);
-  return ctx.armazem.ajudantes.listar().map((a) => resumoPerfil(ctx, a, ruaDe));
+  const unidadeDe = resolvedorDeUnidade(ctx);
+  return ctx.armazem.ajudantes.listar().map((a) => resumoPerfil(ctx, a, unidadeDe));
 }
 
 export interface RuaDoPerfil extends RuaRef {
@@ -256,8 +313,9 @@ export function detalharPerfil(ctx: Contexto, ajudanteId: string): DetalhePerfil
   const a = ctx.armazem.ajudantes.porId(ajudanteId);
   if (!a) throw new ErroAplicacao('AJUDANTE_INEXISTENTE', 'ajudante não encontrado', 404);
   const ruaDe = resolvedorDeRua(ctx);
+  const unidadeDe = resolvedorDeUnidade(ctx);
   const regiaoDe = consultorDeRegioes(ctx);
-  const r = resumoPerfil(ctx, a, ruaDe);
+  const r = resumoPerfil(ctx, a, unidadeDe);
   const carga = ctx.armazem.cargas.ativaDoAjudante(a.id);
   const pacotes = carga ? carga.pacoteIds.map((id) => ctx.armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p) : [];
   const ocorrencias = pacotes
@@ -267,7 +325,11 @@ export function detalharPerfil(ctx: Contexto, ajudanteId: string): DetalhePerfil
   const recebida = carga ? ctx.armazem.cargas.eventos(carga.id).filter((e) => e.tipo === 'RECEBIDA_NO_STREET').at(-1) : undefined;
   return {
     ...r,
-    ruasDaCarga: ruasDaCarga(pacotes, ruaDe).map((x) => ({ ...x, regiao: regiaoDe(x.chave) })),
+    // Caixas da carga (a unidade que entra/sai da carga); as ruas de verdade aparecem nas paradas.
+    ruasDaCarga: ruasDaCarga(pacotes, unidadeDe).map((x) => ({
+      ...x,
+      regiao: x.chave.startsWith('regiao:') ? regiaoDe(x.chave) : ({ status: 'desconhecida' } as const),
+    })),
     rotaIniciadaEm: carga?.rotaIniciadaEm ?? null,
     montadaEm: carga?.criadaEm ?? null,
     recebidaNoStreetEm: recebida?.ocorridoEm ?? null,
@@ -277,65 +339,73 @@ export function detalharPerfil(ctx: Contexto, ajudanteId: string): DetalhePerfil
 }
 
 // ---------------------------------------------------------------------------
-// Atribuir ruas → carga MONTADA
+// Repassar CAIXAS → carga MONTADA
 // ---------------------------------------------------------------------------
 
-/** Chave de rua vinda da tela: nome de rua é normalizado; grupo (`regiao:<id>`, ex.: Diversos) passa intacto. */
-const chaveEntrada = (k: string) => (k.startsWith('regiao:') ? k : chaveRua(k));
+/** Chave vinda da tela: caixa (`regiao:<id>`) passa intacta; nome de rua vira a chave da rua. */
+const chaveEntrada = (k: string) => (k.startsWith('regiao:') || k.startsWith('sem:') ? k : chaveRua(k));
 
 const livre = (p: Pacote) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO');
 
-/** Rua que ficou fora de uma seleção de REGIÃO inteira, e por quê (sempre dito na tela). */
+/** Caixa que ficou fora de uma seleção de GRUPO inteiro (Associações), e por quê (sempre dito na tela). */
 export interface RuaDeFora {
   rua: string;
   com: string;
-  /** Pacotes da rua que continuam no galpão (a rua não se divide entre dois ajudantes). */
+  /** Pacotes da caixa que continuam no galpão (a caixa não se divide entre dois ajudantes). */
   pacotes: number;
 }
 
+type UnidadeDe = ReturnType<typeof resolvedorDeUnidade>;
+
 /**
- * Selecionar a REGIÃO inteira (`regiao:<id>`) = todas as ruas dela que ainda têm pacote disponível.
- * Rua já toda com ajudante fica de fora. Rua DIVIDIDA (parte já com OUTRO ajudante) também fica de fora —
- * uma rua não fica com dois ajudantes — e volta em `deFora` para a tela avisar. Região de repasse único
- * (Diversos) já é a própria "rua". Rua escolhida sozinha continua recusando com erro (não é silenciosa).
+ * O que foi pedido → caixas:
+ *  - caixa (`regiao:<id>`) → ela mesma;
+ *  - GRUPO (Associações) → as caixas dele com pacote disponível; caixa já com OUTRO ajudante fica de fora
+ *    COM aviso (`deFora`), porque uma caixa não fica com dois ajudantes;
+ *  - nome de rua → a caixa dos pacotes dessa rua (rua ainda sem caixa: erro, vai para a triagem).
  */
-function expandirRegiao(
+function expandirPedido(
   ctx: Contexto,
   chave: string,
   pacotes: Pacote[],
-  ruaDe: (p: Pacote) => { chave: string; nome: string },
+  unidadeDe: UnidadeDe,
   ajudanteId: string,
-): { ruas: string[]; deFora: RuaDeFora[] } {
-  if (!chave.startsWith('regiao:')) return { ruas: [chave], deFora: [] };
+): { caixas: string[]; deFora: RuaDeFora[] } {
+  if (chave.startsWith('sem:')) {
+    throw new ErroAplicacao('SEM_CAIXA', 'esses pacotes ainda não têm caixa: diga a caixa deles na triagem antes do repasse', 409);
+  }
+  if (!chave.startsWith('regiao:')) {
+    const daRua = pacotes.filter((p) => unidadeDe(p).rua.chave === chave);
+    const semCaixa = daRua.filter((p) => livre(p) && !unidadeDe(p).caixa);
+    if (semCaixa.length > 0) {
+      throw new ErroAplicacao('SEM_CAIXA', `${semCaixa.length} pacote(s) de ${unidadeDe(semCaixa[0]).rua.nome} ainda sem caixa: faça a triagem antes do repasse`, 409);
+    }
+    const caixas = [...new Set(daRua.map((p) => unidadeDe(p).chave))];
+    return { caixas: caixas.length ? caixas : [chave], deFora: [] };
+  }
   const id = chave.slice('regiao:'.length);
   const regiao = ctx.armazem.regioes.porId(id);
-  if (!regiao) throw new ErroAplicacao('REGIAO_INEXISTENTE', 'região não encontrada', 404);
-  if (regiao.repasseUnico) return { ruas: [chave], deFora: [] };
-  const regiaoDe = consultorDeRegioes(ctx);
-  const porRua = new Map<string, Pacote[]>();
-  for (const p of pacotes) {
-    const k = ruaDe(p).chave;
-    const r = regiaoDe(k);
-    if (r.status === 'conhecida' && r.id === id) porRua.set(k, [...(porRua.get(k) ?? []), p]);
-  }
-  const ruas: string[] = [];
+  if (!regiao) throw new ErroAplicacao('REGIAO_INEXISTENTE', 'caixa não encontrada', 404);
+  const filhas = ctx.armazem.regioes.listar().filter((r) => r.paiId === id);
+  if (filhas.length === 0) return { caixas: [chave], deFora: [] };
+  const caixas: string[] = [];
   const deFora: RuaDeFora[] = [];
-  for (const [k, lista] of porRua) {
-    const livres = lista.filter(livre).length;
-    if (livres === 0) continue;
+  for (const f of filhas) {
+    const lista = pacotes.filter((p) => unidadeDe(p).caixa?.id === f.id);
+    const noGalpao = lista.filter((p) => livre(p) && p.responsavelId === null).length;
+    if (lista.filter(livre).length === 0) continue;
     const outro = lista.find((p) => p.responsavelId !== null && p.responsavelId !== ajudanteId);
     if (outro) {
-      const noGalpao = lista.filter((p) => livre(p) && p.responsavelId === null).length;
-      deFora.push({ rua: ruaDe(outro).nome, com: ctx.armazem.ajudantes.porId(outro.responsavelId!)?.nome ?? 'outro ajudante', pacotes: noGalpao });
+      deFora.push({ rua: f.nome, com: ctx.armazem.ajudantes.porId(outro.responsavelId!)?.nome ?? 'outro ajudante', pacotes: noGalpao });
       continue;
     }
-    ruas.push(k);
+    caixas.push(`regiao:${f.id}`);
   }
-  if (ruas.length === 0) {
+  if (caixas.length === 0) {
     const motivo = deFora.length ? ` (${deFora.map((d) => `${d.rua} já está com ${d.com}`).join('; ')})` : '';
-    throw new ErroAplicacao('REGIAO_SEM_PACOTES', `a região ${regiao.nome} não tem pacotes disponíveis para atribuir${motivo}`, 409);
+    throw new ErroAplicacao('REGIAO_SEM_PACOTES', `${regiao.nome} não tem pacotes disponíveis para repassar${motivo}`, 409);
   }
-  return { ruas, deFora };
+  return { caixas, deFora };
 }
 
 function erroDominio<T>(fn: () => T, codigo?: string): T {
@@ -348,15 +418,16 @@ function erroDominio<T>(fn: () => T, codigo?: string): T {
 }
 
 /**
- * Atribui ruas INTEIRAS a um ajudante. Os pacotes entram na carga ativa MONTADA dele
- * (ou numa carga nova). Tudo ou nada.
+ * Repassa CAIXAS INTEIRAS a um ajudante. Os pacotes entram na carga ativa MONTADA dele
+ * (ou numa carga nova). Tudo ou nada. Uma caixa não fica com dois ajudantes; pacote sem caixa não sai.
+ * (Nome mantido: a API e o histórico já chamam assim; hoje cada "rua" da entrada é uma caixa.)
  */
 export function atribuirRuas(
   ctx: Contexto,
   entrada: { ajudanteId: string; ruas: string[]; ator: string; chave: string },
 ): { carga: Carga; pacotes: number; ruas: RuaRef[]; deFora: RuaDeFora[] } {
   const pedidas = [...new Set(entrada.ruas.map(chaveEntrada).filter(Boolean))];
-  if (pedidas.length === 0) throw new ErroAplicacao('SEM_RUAS', 'selecione ao menos uma rua');
+  if (pedidas.length === 0) throw new ErroAplicacao('SEM_RUAS', 'selecione ao menos uma caixa');
   if (!entrada.chave) throw new ErroAplicacao('SEM_CHAVE', 'chave de idempotência obrigatória');
   const { armazem } = ctx;
   return armazem.transacao(() => {
@@ -373,34 +444,34 @@ export function atribuirRuas(
       return { carga, pacotes: feito.dados.ruas.reduce((n, r) => n + r.quantidade, 0), ruas: feito.dados.ruas, deFora: [] };
     }
     if (carga?.rotaIniciadaEm) {
-      throw new ErroAplicacao('JA_EM_ROTA', `${ajudante.nome} já está em rota com a carga ${carga.codigo}: carga em rota é FECHADA (não recebe novas ruas)`, 409);
+      throw new ErroAplicacao('JA_EM_ROTA', `${ajudante.nome} já está em rota com a carga ${carga.codigo}: carga em rota é FECHADA (não recebe novas caixas)`, 409);
     }
 
-    // Valida TODAS as ruas antes de gravar qualquer coisa.
+    // Valida TODAS as caixas antes de gravar qualquer coisa.
     const { pacotes } = pacotesNaOperacao(ctx);
-    const ruaDe = resolvedorDeRua(ctx);
-    const expandidas = pedidas.map((k) => expandirRegiao(ctx, k, pacotes, ruaDe, ajudante.id));
-    const chaves = [...new Set(expandidas.flatMap((e) => e.ruas))];
-    const deFora = expandidas.flatMap((e) => e.deFora).filter((d) => !chaves.includes(chaveEntrada(d.rua)));
-    const porRua = new Map<string, Pacote[]>();
+    const unidadeDe = resolvedorDeUnidade(ctx);
+    const expandidas = pedidas.map((k) => expandirPedido(ctx, k, pacotes, unidadeDe, ajudante.id));
+    const chaves = [...new Set(expandidas.flatMap((e) => e.caixas))];
+    const deFora = expandidas.flatMap((e) => e.deFora);
+    const porCaixa = new Map<string, Pacote[]>();
     for (const p of pacotes) {
-      const k = ruaDe(p).chave;
-      if (chaves.includes(k)) porRua.set(k, [...(porRua.get(k) ?? []), p]);
+      const k = unidadeDe(p).chave;
+      if (chaves.includes(k)) porCaixa.set(k, [...(porCaixa.get(k) ?? []), p]);
     }
     const ruasRef: RuaRef[] = [];
-    const entram: Pacote[] = [];
+    const entram: { p: Pacote; caixa: Regiao | null }[] = [];
     for (const k of chaves) {
-      const lista = porRua.get(k) ?? [];
-      const nome = agruparPorRua(lista, ruaDe)[0]?.nome ?? k;
+      const lista = porCaixa.get(k) ?? [];
+      const nome = lista[0] ? unidadeDe(lista[0]).nome : k;
       const deOutro = lista.filter((p) => p.responsavelId !== null && p.responsavelId !== ajudante.id);
       if (deOutro.length > 0) {
         const outro = armazem.ajudantes.porId(deOutro[0].responsavelId!)?.nome ?? 'outro ajudante';
-        throw new ErroAplicacao('RUA_DE_OUTRO', `a rua ${nome} tem ${deOutro.length} pacote(s) com ${outro}: uma rua não fica com dois ajudantes`, 409);
+        throw new ErroAplicacao('CAIXA_DE_OUTRO', `a caixa ${nome} tem ${deOutro.length} pacote(s) com ${outro}: uma caixa não fica com dois ajudantes`, 409);
       }
       const livres = lista.filter(livre);
-      if (livres.length === 0) throw new ErroAplicacao('RUA_SEM_PACOTES', `a rua ${nome} não tem pacotes disponíveis para atribuir`, 409);
+      if (livres.length === 0) throw new ErroAplicacao('CAIXA_SEM_PACOTES', `a caixa ${nome} não tem pacotes disponíveis para repassar`, 409);
       ruasRef.push({ chave: k, nome, quantidade: livres.length });
-      entram.push(...livres);
+      entram.push(...livres.map((p) => ({ p, caixa: unidadeDe(p).caixa })));
     }
 
     if (!carga) {
@@ -425,7 +496,7 @@ export function atribuirRuas(
     const cargaRef = { id: carga.id, codigo: carga.codigo };
     const base = { ator: entrada.ator, origem: 'hub' as const, ocorridoEm: agora, registradoEm: agora };
 
-    for (const p of entram) {
+    for (const { p, caixa } of entram) {
       if (p.estado === 'NAO_ATRIBUIDO') {
         erroDominio(() => registrarEvento(armazem, {
           ...base, id: ctx.ids.novo(), pacoteId: p.id, tipo: 'ATRIBUIDO', dados: { ajudante: ref },
@@ -433,11 +504,12 @@ export function atribuirRuas(
         }), p.codigo);
       }
       erroDominio(() => registrarEvento(armazem, {
-        ...base, id: ctx.ids.novo(), pacoteId: p.id, tipo: 'INCLUIDO_EM_CARGA', dados: { carga: cargaRef, ajudante: ref },
+        ...base, id: ctx.ids.novo(), pacoteId: p.id, tipo: 'INCLUIDO_EM_CARGA',
+        dados: { carga: cargaRef, ajudante: ref, ...(caixa ? { caixa: refCaixa(caixa) } : {}) },
         chaveIdempotencia: `rua:${entrada.chave}:incluido:${carga.id}:${p.id}`,
       }), p.codigo);
     }
-    armazem.cargas.adicionarPacotes(carga.id, entram.map((p) => p.id));
+    armazem.cargas.adicionarPacotes(carga.id, entram.map(({ p }) => p.id));
     armazem.cargas.anexarEvento({
       id: ctx.ids.novo(), cargaId: carga.id, tipo: 'RUAS_ADICIONADAS', dados: { ruas: ruasRef, chave: entrada.chave },
       ator: entrada.ator, ocorridoEm: agora, registradoEm: agora,
@@ -446,7 +518,7 @@ export function atribuirRuas(
   });
 }
 
-/** Tira uma rua de uma carga MONTADA. Os pacotes voltam ao galpão sem responsável (ou vão para outro ajudante). */
+/** Tira uma CAIXA de uma carga MONTADA. Os pacotes voltam ao galpão sem responsável (ou vão para outro ajudante). */
 export function removerRuaDaCarga(
   ctx: Contexto,
   entrada: { cargaId: string; rua: string; ator: string; paraAjudanteId?: string },
@@ -456,19 +528,25 @@ export function removerRuaDaCarga(
     const carga = armazem.cargas.porId(entrada.cargaId);
     if (!carga) throw new ErroAplicacao('CARGA_INEXISTENTE', 'carga não encontrada', 404);
     if (carga.rotaIniciadaEm || carga.finalizadaEm) {
-      throw new ErroAplicacao('CARGA_NA_RUA', 'só é possível mexer nas ruas antes de iniciar a rota', 409);
+      throw new ErroAplicacao('CARGA_NA_RUA', 'só é possível mexer nas caixas antes de iniciar a rota', 409);
     }
-    const k = chaveEntrada(entrada.rua);
-    const ruaDe = resolvedorDeRua(ctx);
-    const pacotes = carga.pacoteIds.map((id) => armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p && ruaDe(p).chave === k);
-    if (pacotes.length === 0) throw new ErroAplicacao('RUA_FORA_DA_CARGA', 'essa rua não está na carga', 404);
-    const rua: RuaRef = { chave: k, nome: agruparPorRua(pacotes, ruaDe)[0].nome, quantidade: pacotes.length };
+    const unidadeDe = resolvedorDeUnidade(ctx);
+    const daCarga = carga.pacoteIds.map((id) => armazem.pacotes.porId(id)).filter((p): p is Pacote => !!p);
+    let k = chaveEntrada(entrada.rua);
+    // nome de rua → a caixa dela nesta carga (a caixa sai inteira)
+    if (!k.startsWith('regiao:')) {
+      const achado = daCarga.find((p) => unidadeDe(p).rua.chave === k);
+      if (achado) k = unidadeDe(achado).chave;
+    }
+    const pacotes = daCarga.filter((p) => unidadeDe(p).chave === k);
+    if (pacotes.length === 0) throw new ErroAplicacao('RUA_FORA_DA_CARGA', 'essa caixa não está na carga', 404);
+    const rua: RuaRef = { chave: unidadeDe(pacotes[0]).chave, nome: unidadeDe(pacotes[0]).nome, quantidade: pacotes.length };
     const para = entrada.paraAjudanteId ? armazem.ajudantes.porId(entrada.paraAjudanteId) : undefined;
     if (entrada.paraAjudanteId && (!para || !para.ativo)) throw new ErroAplicacao('AJUDANTE_INEXISTENTE', 'ajudante de destino não encontrado', 404);
-    if (para?.id === carga.ajudante.id) throw new ErroAplicacao('MESMO_AJUDANTE', 'a rua já está com esse ajudante', 409);
+    if (para?.id === carga.ajudante.id) throw new ErroAplicacao('MESMO_AJUDANTE', 'a caixa já está com esse ajudante', 409);
     const agora = ctx.relogio.agora();
     const base = { ator: entrada.ator, origem: 'hub' as const, ocorridoEm: agora, registradoEm: agora };
-    const motivo = para ? `rua ${rua.nome} reatribuída para ${para.nome}` : `rua ${rua.nome} removida da carga`;
+    const motivo = para ? `caixa ${rua.nome} reatribuída para ${para.nome}` : `caixa ${rua.nome} removida da carga`;
     const marca = ctx.ids.novo();
 
     for (const p of pacotes) {
@@ -494,8 +572,8 @@ export function removerRuaDaCarga(
       dados: { rua, motivo: para ? 'reatribuida' : 'removida', ...(para ? { para: { id: para.id, nome: para.nome } } : {}) },
       ator: entrada.ator, ocorridoEm: agora, registradoEm: agora,
     });
-    // Reatribuir = a rua inteira entra na carga do outro ajudante (mesmas regras de atribuição).
-    if (para) atribuirRuas(ctx, { ajudanteId: para.id, ruas: [k], ator: entrada.ator, chave: `reatrib:${marca}` });
+    // Reatribuir = a caixa inteira entra na carga do outro ajudante (mesmas regras do repasse).
+    if (para) atribuirRuas(ctx, { ajudanteId: para.id, ruas: [rua.chave], ator: entrada.ator, chave: `reatrib:${marca}` });
     return { pacotes: pacotes.length };
   });
 }

@@ -8,18 +8,18 @@ import { documentoDaCarga, iniciarRota } from '../src/application/cargas';
 import { detalharPacote } from '../src/application/consultas';
 import { confirmarImportacao, prepararImportacao } from '../src/application/importacao';
 import { entregarAoAjudante } from '../src/application/operacao';
-import { atribuirRuas, criarPerfil, editarPerfil, listarPerfis, listarUnidades } from '../src/application/orquestracao';
+import { atribuirRuas, criarPerfil, editarPerfil, listarPerfis, listarRuas, listarUnidades } from '../src/application/orquestracao';
 import type { Contexto } from '../src/application/portas';
 import { criarRegiao, definirRegiao } from '../src/application/regioes';
 import { cargasDoPerfil, confirmarRecebimento, perfisParaStreet, receberEventosStreet } from '../src/application/transporteStreet';
 import { podeFicarProntoParaBaixa } from '../src/domain/confirmacao';
-import { contextoDeTeste, documento, pacote } from './ajuda';
+import { caixaParaCadaRua, contextoDeTeste, documento, pacote } from './ajuda';
 
 /**
  * Lote parecido com o real: Manilha (Rua B + Leão XIII), Quinta do Caju (beco ensinado), ruas soltas,
  * grafias da J&T ("PRAIA DO CAJU") e duas ruas parecidas que NÃO são a mesma (Seidl × Seixas).
  */
-function operacao() {
+function operacao(caixas = true) {
   const ctx = contextoDeTeste();
   const manilha = criarRegiao(ctx, 'Manilha', 'Galpão');
   definirRegiao(ctx, { rua: 'Rua B', regiaoId: manilha.id, ator: 'Galpão', prioridade: 1 });
@@ -42,6 +42,7 @@ function operacao() {
   });
   if (!r.ok) throw new Error('import');
   confirmarImportacao(ctx, r.loteId, 'Galpão');
+  if (caixas) caixaParaCadaRua(ctx); // V0.5: ruas soltas nas suas caixas de rua (Seidl, Seixas, Praia do Caju)
   const hugo = criarPerfil(ctx, { nome: 'Hugo' });
   const ana = criarPerfil(ctx, { nome: 'Ana' });
   return { ctx, hugo, ana, manilha, quinta };
@@ -65,7 +66,7 @@ describe('orquestrador: unidades de repasse', () => {
   it('1. região fechada é UM card resumido (quanto tem aqui) — as ruas dela não aparecem soltas', () => {
     const { ctx } = operacao();
     const m = unidade(ctx, 'Manilha')!;
-    expect(m).toMatchObject({ tipo: 'regiao', total: 3, disponiveis: 3 });
+    expect(m).toMatchObject({ tipo: 'caixa', total: 3, disponiveis: 3 });
     expect(m.ruas).toHaveLength(2);
     const nomes = listarUnidades(ctx).map((u) => u.nome);
     expect(nomes).not.toContain('Rua B');
@@ -78,9 +79,11 @@ describe('orquestrador: unidades de repasse', () => {
     expect(unidade(ctx, 'Quinta do Caju')!.ruas.map((r) => r.nome)).toEqual(['Beco Antônio Faria Salgado']);
   });
 
-  it('3. rua sem região é o próprio card (sem camada extra)', () => {
-    const { ctx } = operacao();
-    expect(unidade(ctx, 'Rua Carlos Seidl')).toMatchObject({ tipo: 'rua', total: 2 });
+  it('3 (V0.5). rua na sua própria caixa é um card; rua SEM caixa não é card (aguarda a triagem)', () => {
+    expect(unidade(operacao().ctx, 'Rua Carlos Seidl')).toMatchObject({ tipo: 'caixa', total: 2 });
+    const semCaixas = operacao(false).ctx;
+    expect(unidade(semCaixas, 'Rua Carlos Seidl')).toBeUndefined();
+    expect(listarRuas(semCaixas).find((r) => r.chave === 'sem:rua carlos seidl')).toMatchObject({ total: 2 });
   });
 
   it('3. selecionar a região → todos os pacotes de todas as ruas dela entram na carga', () => {
@@ -105,32 +108,46 @@ describe('orquestrador: unidades de repasse', () => {
     expect(new Set(r.carga.pacoteIds).size).toBe(r.carga.pacoteIds.length);
   });
 
-  it('6. rua não pode estar em duas cargas ativas (nem pela região inteira)', () => {
+  it('6. caixa não fica em duas cargas ativas (pedir uma rua leva a caixa inteira dela)', () => {
     const { ctx, hugo, ana, manilha } = operacao();
     atribuirRuas(ctx, { ajudanteId: hugo.id, ruas: ['Rua B'], ator: 'Galpão', chave: 'c1' });
-    expect(erro(() => atribuirRuas(ctx, { ajudanteId: ana.id, ruas: ['Rua B'], ator: 'Galpão', chave: 'c2' })).codigo).toBe('RUA_DE_OUTRO');
-    // a região inteira para a Ana leva só o que sobrou (Leão XIII); a Rua B continua só com o Hugo
-    const r = atribuirRuas(ctx, { ajudanteId: ana.id, ruas: [`regiao:${manilha.id}`], ator: 'Galpão', chave: 'c3' });
-    expect(r.ruas.map((x) => x.nome)).toEqual(['Rua Leão XIII']);
-    expect(porCodigo(ctx, 'M1').responsavelId).toBe(hugo.id);
+    expect(erro(() => atribuirRuas(ctx, { ajudanteId: ana.id, ruas: ['Rua B'], ator: 'Galpão', chave: 'c2' })).codigo).toBe('CAIXA_DE_OUTRO');
+    // V0.5: pedir a Rua B levou a caixa Manilha INTEIRA para o Hugo; a Manilha não vai para a Ana
+    expect(erro(() => atribuirRuas(ctx, { ajudanteId: ana.id, ruas: [`regiao:${manilha.id}`], ator: 'Galpão', chave: 'c3' })).codigo).toBe('CAIXA_DE_OUTRO');
+    expect(['M1', 'M2', 'M3'].map((c) => porCodigo(ctx, c).responsavelId)).toEqual([hugo.id, hugo.id, hugo.id]);
   });
 });
 
-describe('região inteira com rua dividida (caso real: beco com parte já com outro ajudante)', () => {
-  it('entram as ruas que podem ir; a rua dividida fica de fora COM aviso (quantos, com quem)', () => {
-    const { ctx, hugo, ana, quinta } = operacao();
+describe('caixa dividida (caso real: parte já com outro ajudante)', () => {
+  it('uma caixa não fica com dois ajudantes: a caixa inteira é recusada, com o motivo', () => {
+    const { ctx, hugo, ana, quinta } = operacao(false);
     definirRegiao(ctx, { rua: 'Rua Carlos Seidl', regiaoId: quinta.id, ator: 'Galpão' });
-    entregarAoAjudanteUm(ctx, 'S1', hugo.id); // S1 com o Hugo; S2 (mesma rua) continua no galpão
-    const r = atribuirRuas(ctx, { ajudanteId: ana.id, ruas: [`regiao:${quinta.id}`], ator: 'Galpão', chave: 'c1' });
-    expect(r.ruas.map((x) => x.nome)).toEqual(['Beco Antônio Faria Salgado']);
-    expect(r.deFora).toEqual([{ rua: 'Rua Carlos Seidl', com: 'Hugo', pacotes: 1 }]);
+    entregarAoAjudanteUm(ctx, 'S1', hugo.id); // S1 com o Hugo; S2 (mesma caixa) continua no galpão
+    const e = erro(() => atribuirRuas(ctx, { ajudanteId: ana.id, ruas: [`regiao:${quinta.id}`], ator: 'Galpão', chave: 'c1' }));
+    expect(e.codigo).toBe('CAIXA_DE_OUTRO');
+    expect(e.message).toMatch(/Quinta do Caju tem 1 pacote\(s\) com Hugo/);
     expect(porCodigo(ctx, 'S2').cargaId).toBeNull();
   });
 
-  it('rua dividida escolhida SOZINHA continua recusada com erro (nada silencioso)', () => {
+  it('GRUPO inteiro (Associações): entram as caixas que podem ir; a dividida fica de fora COM aviso', () => {
+    const { ctx, hugo, ana } = operacao(false);
+    const assoc = criarRegiao(ctx, 'Associações', 'Galpão');
+    const chatuba = criarRegiao(ctx, 'Associação da Chatuba', 'Galpão');
+    const cremente = criarRegiao(ctx, 'Associação da Cremente', 'Galpão');
+    for (const c of [chatuba, cremente]) ctx.armazem.regioes.configurarCaixa(c.id, { nome: c.nome, numero: null, ordem: null, paiId: assoc.id, repasseUnico: false });
+    definirRegiao(ctx, { rua: 'Rua Carlos Seidl', regiaoId: chatuba.id, ator: 'Galpão' });
+    definirRegiao(ctx, { rua: 'Rua Carlos Seixas', regiaoId: cremente.id, ator: 'Galpão' });
+    entregarAoAjudanteUm(ctx, 'S1', hugo.id); // Chatuba dividida: S1 com o Hugo, S2 no galpão
+    const r = atribuirRuas(ctx, { ajudanteId: ana.id, ruas: [`regiao:${assoc.id}`], ator: 'Galpão', chave: 'c1' });
+    expect(r.ruas.map((x) => x.nome)).toEqual(['Associação da Cremente']);
+    expect(r.deFora).toEqual([{ rua: 'Associação da Chatuba', com: 'Hugo', pacotes: 1 }]);
+    expect(porCodigo(ctx, 'S2').cargaId).toBeNull();
+  });
+
+  it('caixa dividida escolhida SOZINHA é recusada com erro (nada silencioso)', () => {
     const { ctx, hugo, ana } = operacao();
     entregarAoAjudanteUm(ctx, 'S1', hugo.id);
-    expect(erro(() => atribuirRuas(ctx, { ajudanteId: ana.id, ruas: ['Rua Carlos Seidl'], ator: 'Galpão', chave: 'c1' })).codigo).toBe('RUA_DE_OUTRO');
+    expect(erro(() => atribuirRuas(ctx, { ajudanteId: ana.id, ruas: ['Rua Carlos Seidl'], ator: 'Galpão', chave: 'c1' })).codigo).toBe('CAIXA_DE_OUTRO');
   });
 });
 
@@ -207,7 +224,7 @@ describe('carga: montada → iniciar rota no Orquestrador → street_id', () => 
     const itens = Object.fromEntries(doc.itens!.map((i) => [i.rua_id, i]));
     expect(itens['rua b']).toMatchObject({ regiao_id: manilha.id, regiao_nome: 'Manilha', pacote_ids: [porCodigo(ctx, 'M1').id] });
     expect(itens['rua leao xiii'].pacote_ids).toHaveLength(2); // "Rua Leão XIII" e "RUA LEAO XIII" = mesma rua
-    expect(itens['rua carlos seidl']).toMatchObject({ regiao_id: null, pacote_ids: [porCodigo(ctx, 'S1').id, porCodigo(ctx, 'S2').id] });
+    expect(itens['rua carlos seidl']).toMatchObject({ regiao_nome: 'Rua Carlos Seidl', pacote_ids: [porCodigo(ctx, 'S1').id, porCodigo(ctx, 'S2').id] });
     // "PRAIA DO CAJU" (sem tipo) encaixa na única "Rua Praia do Caju": um street_id só
     expect(itens['rua praia do caju'].pacote_ids).toHaveLength(2);
     const p1 = doc.pacotes.find((p) => p.codigo === 'P1')!;
@@ -223,7 +240,7 @@ describe('carga: montada → iniciar rota no Orquestrador → street_id', () => 
   });
 
   it('região não funde logradouros: Seixas numa região junto com Seidl continua outra rua', () => {
-    const { ctx, hugo } = operacao();
+    const { ctx, hugo } = operacao(false);
     const g = criarRegiao(ctx, 'Rua Carlos Seidl', 'Galpão');
     definirRegiao(ctx, { rua: 'Rua Carlos Seidl', regiaoId: g.id, ator: 'Galpão' });
     definirRegiao(ctx, { rua: 'Rua Carlos Seixas', regiaoId: g.id, ator: 'Galpão' });
@@ -245,7 +262,7 @@ describe('carga: montada → iniciar rota no Orquestrador → street_id', () => 
     confirmarImportacao(ctx, r.loteId, 'Galpão');
     const u = listarUnidades(ctx);
     expect(u).toHaveLength(1);
-    expect(u[0]).toMatchObject({ tipo: 'regiao', nome: 'Beira', total: 2 });
+    expect(u[0]).toMatchObject({ tipo: 'caixa', nome: 'Beira', total: 2 });
     expect(u[0].ruas.map((x) => x.chave)).toEqual(['rua praia do caju']);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { idLogradouro, partesDoLogradouro, resolverLogradouro } from './logradouro';
+import { idLogradouro, mesmaRuaPorCep, nomeQuaseIgual, partesDoLogradouro, resolverLogradouro } from './logradouro';
 
 describe('identidade do logradouro (street_id)', () => {
   it('ignora maiúsculas, acentos, espaços e pontuação', () => {
@@ -63,5 +63,31 @@ describe('resolverLogradouro (encaixar no que já existe)', () => {
 
   it('parecido não é igual', () => {
     expect(resolverLogradouro('Rua Carlos Seixas', cards)).toEqual({ como: 'desconhecido', id: 'rua carlos seixas', nome: 'Rua Carlos Seixas' });
+  });
+});
+
+describe('CEP tira a dúvida de digitação (casos reais do lote de 29/09)', () => {
+  it('mesmo CEP + nome quase igual = mesma rua', () => {
+    expect(mesmaRuaPorCep({ nome: 'Rua Monsenhor Manuel Gomes', cep: '20931-670' }, { nome: 'Rua Monsenhor Manoel Gomes', cep: '20931670' })).toBe(true);
+    expect(mesmaRuaPorCep({ nome: 'Rua Carlos Seidi', cep: '20931002' }, { nome: 'Rua Carlos Seidl', cep: '20931002' })).toBe(true);
+    expect(mesmaRuaPorCep({ nome: 'Rua General Gurião', cep: '20931040' }, { nome: 'Rua General Gurjão', cep: '20931040' })).toBe(true);
+    expect(mesmaRuaPorCep({ nome: 'Tavares de Guerra', cep: '20931330' }, { nome: 'Tavares Guerra', cep: '20931330' })).toBe(true);
+    expect(mesmaRuaPorCep({ nome: 'Tavares de Guerra', cep: '20931330' }, { nome: 'Rua Tavares Guerra', cep: '20931330' })).toBe(true);
+  });
+
+  it('CEP sozinho não junta: no Caju um CEP cobre várias ruas', () => {
+    expect(mesmaRuaPorCep({ nome: 'Rua E', cep: '20931030' }, { nome: 'Rua Leão XIII', cep: '20931030' })).toBe(false);
+    expect(mesmaRuaPorCep({ nome: 'Rua Luiz Pimenta', cep: '20931004' }, { nome: 'Rua Carlos Seidl', cep: '20931004' })).toBe(false);
+    expect(mesmaRuaPorCep({ nome: 'Rua A', cep: '20931025' }, { nome: 'Rua E', cep: '20931025' })).toBe(false);
+  });
+
+  it('nome parecido com CEP diferente continua outra rua (Seidl ≠ Seixas)', () => {
+    expect(mesmaRuaPorCep({ nome: 'Rua Carlos Seixas', cep: '20931007' }, { nome: 'Rua Carlos Seidl', cep: '20931002' })).toBe(false);
+    expect(nomeQuaseIgual('Rua Carlos Seixas', 'Rua Carlos Seidl')).toBe(false);
+  });
+
+  it('tipo diferente nunca é erro de digitação; sem CEP não decide', () => {
+    expect(mesmaRuaPorCep({ nome: 'Travessa Miguel de Almeida', cep: '20931060' }, { nome: 'Rua Miguel de Almeida', cep: '20931060' })).toBe(false);
+    expect(mesmaRuaPorCep({ nome: 'Rua Monsenhor Manuel Gomes', cep: '' }, { nome: 'Rua Monsenhor Manoel Gomes', cep: '' })).toBe(false);
   });
 });

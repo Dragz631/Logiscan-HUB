@@ -97,3 +97,54 @@ export function resolverLogradouro(nome: string, conhecidos: readonly string[]):
   if (igual) return { como: 'igual', id, nome: limparEspacos(igual) };
   return { como: 'desconhecido', id, nome: limpo };
 }
+
+// ---------------------------------------------------------------------------
+// Erro de digitação confirmado pelo CEP
+// ---------------------------------------------------------------------------
+
+const LIGACOES = new Set(['de', 'da', 'do', 'das', 'dos', 'e']);
+
+/** Distância de edição (Levenshtein) — quantas letras trocar/incluir/tirar para ir de a até b. */
+function distancia(a: string, b: string): number {
+  const linha = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = linha[0];
+    linha[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const acima = linha[j];
+      linha[j] = Math.min(linha[j] + 1, linha[j - 1] + 1, diagonal + (a[i - 1] === b[j - 1] ? 0 : 1));
+      diagonal = acima;
+    }
+  }
+  return linha[b.length];
+}
+
+/**
+ * Nomes QUASE iguais (cara de erro de digitação/OCR): mesmo tipo de logradouro (ou um deles sem tipo) e o nome próprio
+ * difere em no máximo 1 letra a cada 8 (máx. 2), ignorando "de/da/do". Nome curto (menos de 6 letras)
+ * nunca entra: "Rua A" × "Rua E" são ruas diferentes. Sozinho NÃO prova nada — só junto com o CEP.
+ */
+export function nomeQuaseIgual(a: string, b: string): boolean {
+  const pa = partesDoLogradouro(idLogradouro(a));
+  const pb = partesDoLogradouro(idLogradouro(b));
+  if (pa.tipo !== null && pb.tipo !== null && pa.tipo !== pb.tipo) return false; // Rua ≠ Travessa; sem tipo compara o nome
+  const na = pa.nucleo.split(' ').filter((t) => !LIGACOES.has(t)).join(' ');
+  const nb = pb.nucleo.split(' ').filter((t) => !LIGACOES.has(t)).join(' ');
+  if (na === nb) return na.length > 0;
+  const menor = Math.min(na.length, nb.length);
+  if (menor < 6) return false;
+  return distancia(na, nb) <= Math.min(2, Math.max(1, Math.floor(menor / 8)));
+}
+
+export const normalizarCep = (cep: string | null | undefined) => (cep ?? '').replace(/\D/g, '');
+
+/**
+ * O CEP tira a dúvida de digitação: MESMO CEP + nome quase igual = a mesma rua
+ * ("Monsenhor Manuel Gomes" × "Monsenhor Manoel Gomes", 20931-670). O CEP sozinho NÃO junta ruas —
+ * no Caju um CEP cobre várias ("Rua E" e "Rua Leão XIII" = 20931-030) — e nome parecido com CEP
+ * diferente continua sendo outra rua ("Carlos Seidl" 20931-002 × "Carlos Seixas" 20931-007).
+ */
+export function mesmaRuaPorCep(a: { nome: string; cep: string }, b: { nome: string; cep: string }): boolean {
+  const ca = normalizarCep(a.cep);
+  return ca.length === 8 && ca === normalizarCep(b.cep) && nomeQuaseIgual(a.nome, b.nome);
+}

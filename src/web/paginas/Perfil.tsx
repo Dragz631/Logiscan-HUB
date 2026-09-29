@@ -137,17 +137,6 @@ export function PerfilPagina({ id }: { id: string }) {
     }
   }
 
-  // Ruas agrupadas por região (ex.: "Manilha — 23 pacotes no total")
-  const porRegiao = new Map<string, { nome: string; total: number; ruas: DetalhePerfil['ruasDaCarga'] }>();
-  for (const r of p.ruasDaCarga) {
-    const k = r.regiao.status === 'conhecida' ? r.regiao.id : r.regiao.status;
-    const nome = r.regiao.status === 'conhecida' ? r.regiao.nome : r.regiao.status === 'sem_regiao' ? 'Outras ruas do Caju' : 'Região a definir';
-    if (!porRegiao.has(k)) porRegiao.set(k, { nome, total: 0, ruas: [] });
-    const g = porRegiao.get(k)!;
-    g.total += r.quantidade;
-    g.ruas.push(r);
-  }
-
   const estado = p.carga ? ROTULO_SITUACAO_PERFIL[p.carga.situacao] : a.ativo ? 'Sem carga' : 'Inativo';
   return (
     <section>
@@ -223,13 +212,10 @@ export function PerfilPagina({ id }: { id: string }) {
 
           {p.carga && (
             <div className="cartao">
-              <h3>Ruas da carga</h3>
-              {[...porRegiao.values()].map((g) => (
-                <div key={g.nome} className="regiao-perfil">
-                  <div className="linha-topo">
-                    <b>{g.nome}</b>
-                    <span className="fraco">{g.total} pacote(s) no total</span>
-                  </div>
+              <h3>Caixas da carga</h3>
+              <p className="fraco sem-margem">A caixa entra e sai da carga inteira (antes de iniciar a rota).</p>
+              {[{ ruas: p.ruasDaCarga }].map((g) => (
+                <div key="caixas" className="regiao-perfil">
                   {g.ruas.map((r) => (
                     <div key={r.chave} className="rua-perfil">
                       <div className="linha-topo">

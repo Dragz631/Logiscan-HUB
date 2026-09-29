@@ -382,3 +382,14 @@ tr.marcada td { background: var(--marcada); }
 .chip-ativo { color: var(--ok); border-color: currentColor; font-size: 0.66rem; padding: 0 0.35rem; }
 .chip-inativo { color: var(--erro); border-color: currentColor; font-size: 0.66rem; padding: 0 0.35rem; }
 .timeline .selo.alerta { display: inline-block; margin: 0.2rem 0; white-space: normal; }
+
+/* V0.5 — Triagem (a mesa das caixas) */
+.lista-triagem { list-style: none; margin: 0.35rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.pacote-triagem { display: flex; gap: 0.55rem; align-items: center; flex-wrap: wrap; border-top: 1px dashed var(--borda); padding-top: 0.35rem; font-size: 0.82rem; }
+.pacote-triagem .quem { flex: 1; min-width: 12rem; display: flex; flex-direction: column; }
+.pacote-triagem .acao { display: flex; gap: 0.35rem; align-items: center; }
+.pacote-triagem select, .card-unidade .acoes-unidade select { max-width: 15rem; }
+.card-unidade .acoes-unidade { flex-wrap: wrap; }
+.caixa-botao { background: none; border: 0; padding: 0; width: 100%; text-align: left; color: inherit; font: inherit; }
+.card-unidade .subcaixas { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.3rem 0 0.1rem 1.6rem; }
+.aviso-revisao { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }

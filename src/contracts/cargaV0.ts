@@ -32,6 +32,17 @@ export const PacoteCargaV0 = z.object({
   rua_id: z.string().optional(),
   rua_nome: z.string().optional(),
   regiao: z.object({ id: z.string(), nome: z.string(), repasse_unico: z.boolean() }).nullable().optional(),
+  /** V0.5: CAIXA em que o pacote saiu (decidida no HUB pelo Hugo/memória). O Street usa como card. */
+  caixa: z.lazy(() => CaixaCargaV0).nullable().optional(),
+});
+
+/** Caixa oficial do HUB: número como o Hugo chama, nome, caixa que agrupa e nomes antigos (para achar o card). */
+export const CaixaCargaV0 = z.object({
+  id: z.string().min(1),
+  numero: z.string().nullable(),
+  nome: z.string().min(1),
+  pai: z.object({ id: z.string(), nome: z.string() }).nullable(),
+  nomes_anteriores: z.array(z.string()),
 });
 
 /** Unidade da carga: UMA rua (street_id) com os pacotes dela. Evita mandar só uma lista de nomes. */
@@ -40,6 +51,7 @@ export const ItemCargaV0 = z.object({
   rua_nome: z.string(),
   regiao_id: z.string().nullable(),
   regiao_nome: z.string().nullable(),
+  caixa: CaixaCargaV0.nullable().optional(),
   pacote_ids: z.array(z.string().min(1)),
 });
 
@@ -63,4 +75,5 @@ export const DocumentoCargaV0 = z.object({
 
 export type PacoteCargaV0 = z.infer<typeof PacoteCargaV0>;
 export type ItemCargaV0 = z.infer<typeof ItemCargaV0>;
+export type CaixaCargaV0 = z.infer<typeof CaixaCargaV0>;
 export type DocumentoCargaV0 = z.infer<typeof DocumentoCargaV0>;

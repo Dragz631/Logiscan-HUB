@@ -2,6 +2,7 @@
 import type { DetalheCarga, ResultadoRetorno, ResumoCarga } from '../application/cargas';
 import type { DadosPerfil, DetalhePerfil, ResumoPerfil, RuaNoOrquestrador, UnidadeRepasse } from '../application/orquestracao';
 import type { RegiaoComRuas, ResultadoDefinicao } from '../application/regioes';
+import type { PacoteTriagem, ResultadoClassificacao, VisaoTriagem } from '../application/triagem';
 import type { Regiao } from '../domain/regioes';
 import type { DocumentoCargaV0 } from '../contracts/cargaV0';
 import type { Pacote } from '../domain/pacote';
@@ -38,7 +39,20 @@ export const api = {
   criarPerfil: (d: DadosPerfil) => chamar<Ajudante>('/ajudantes', { body: d }),
   editarPerfil: (id: string, d: DadosPerfil) => chamar<Ajudante>(`/ajudantes/${id}`, { method: 'PUT', body: d }),
   perfil: (id: string) => chamar<DetalhePerfil>(`/perfis/${id}`),
-  orquestrador: () => chamar<{ ruas: RuaNoOrquestrador[]; unidades: UnidadeRepasse[]; perfis: ResumoPerfil[]; regioes: Regiao[] }>('/orquestrador'),
+  orquestrador: () =>
+    chamar<{
+      ruas: RuaNoOrquestrador[];
+      unidades: UnidadeRepasse[];
+      perfis: ResumoPerfil[];
+      regioes: Regiao[];
+      aguardandoRevisao: { pacotes: number; ruas: number };
+    }>('/orquestrador'),
+  triagem: () => chamar<VisaoTriagem>('/triagem'),
+  pacotesDaCaixa: (caixaId: string) => chamar<PacoteTriagem[]>(`/triagem/caixas/${caixaId}`),
+  classificarRua: (rua: string, caixaId: string, ator: string, substituir = false) =>
+    chamar<ResultadoDefinicao>('/triagem/rua', { body: { rua, caixaId, ator, substituir } }),
+  classificarPacote: (pacoteId: string, caixaId: string, ator: string, substituir = false, motivo?: string) =>
+    chamar<ResultadoClassificacao>('/triagem/pacote', { body: { pacoteId, caixaId, ator, substituir, ...(motivo ? { motivo } : {}) } }),
   criarRegiao: (nome: string, ator: string, repasseUnico = false) => chamar<Regiao>('/regioes', { body: { nome, ator, repasseUnico } }),
   definirRegiao: (rua: string, regiaoId: string | null, ator: string, substituir = false, prioridade?: number | null) =>
     chamar<ResultadoDefinicao>('/regioes/definir', {

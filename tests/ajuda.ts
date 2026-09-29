@@ -1,5 +1,7 @@
 /** Utilidades de teste: contexto em memória com relógio e IDs determinísticos. */
 import type { Contexto } from '../src/application/portas';
+import { criarRegiao, definirRegiao } from '../src/application/regioes';
+import { chaveRua } from '../src/domain/ruas';
 import { abrirBanco, criarArmazemSqlite } from '../src/infrastructure/sqlite';
 
 export function contextoDeTeste(): Contexto & { avancar(min: number): void } {
@@ -16,7 +18,7 @@ export function contextoDeTeste(): Contexto & { avancar(min: number): void } {
 }
 
 type P = Partial<{
-  tracking_code: string; recipient_name: string; street: string; number: string; complement: string;
+  tracking_code: string; recipient_name: string; street: string; number: string; complement: string; cep: string;
   review_items: { reason: string; code: string; field: string }[];
 }>;
 
@@ -56,4 +58,22 @@ export function documento(pacotes: Record<string, unknown>[], extra: Record<stri
     duplicates: [],
     ...extra,
   });
+}
+
+/**
+ * V0.5: cada rua dos pacotes na SUA caixa (como as caixas de rua do Hugo: "Rua Carlos Seidl" = caixa 1).
+ * Não mexe em rua que já tem caixa nem nas ruas de `exceto`. Nome da caixa = grafia mais comum da rua.
+ */
+export function caixaParaCadaRua(ctx: Contexto, exceto: string[] = []): void {
+  const fora = new Set(exceto.map(chaveRua));
+  const nomes = new Map<string, string>();
+  for (const p of ctx.armazem.pacotes.listar()) {
+    const k = chaveRua(p.dados.rua);
+    if (!k || fora.has(k) || ctx.armazem.regioes.associacao(k) || nomes.has(k)) continue;
+    nomes.set(k, p.dados.rua.replace(/\s+/g, ' ').trim());
+  }
+  for (const nome of nomes.values()) {
+    const caixa = criarRegiao(ctx, nome, 'Galpão');
+    definirRegiao(ctx, { rua: nome, regiaoId: caixa.id, ator: 'Galpão' });
+  }
 }

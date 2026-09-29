@@ -74,8 +74,20 @@ export interface CargaRef {
   codigo: string;
 }
 
-/** O pacote entrou numa carga MONTADA (continua no galpão, ATRIBUIDO). */
-export type EventoIncluidoEmCarga = Base<'INCLUIDO_EM_CARGA', { carga: CargaRef; ajudante: AjudanteRef }>;
+/** O pacote entrou numa carga MONTADA (continua no galpão, ATRIBUIDO). `caixa` = em qual caixa ele saiu (prova). */
+export type EventoIncluidoEmCarga = Base<'INCLUIDO_EM_CARGA', { carga: CargaRef; ajudante: AjudanteRef; caixa?: CaixaRef }>;
+
+export interface CaixaRef {
+  id: string;
+  numero: string | null;
+  nome: string;
+}
+
+/**
+ * Triagem: o Hugo disse em qual CAIXA o pacote fica (a memória não sabia, ou é uma exceção da pessoa —
+ * ex.: endereço na Carlos Seidl, entregue na associação). Só no galpão, antes de entrar em carga.
+ */
+export type EventoCaixaDefinida = Base<'CAIXA_DEFINIDA', { caixa: CaixaRef; anterior: CaixaRef | null; motivo: string }>;
 
 /** Saiu de uma carga MONTADA antes da rota (rua removida/reatribuída). Continua com o mesmo responsável. */
 export type EventoRetiradoDaCarga = Base<'RETIRADO_DA_CARGA', { carga: CargaRef; motivo: string }>;
@@ -128,7 +140,8 @@ export type Evento =
   | EventoSaiuParaRota
   | EventoEntregaRegistrada
   | EventoInsucessoRegistrado
-  | EventoCorrecaoRegistrada;
+  | EventoCorrecaoRegistrada
+  | EventoCaixaDefinida;
 
 export type TipoEvento = Evento['tipo'];
 
@@ -172,6 +185,7 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
       estado: 'NAO_ATRIBUIDO',
       responsavelId: null,
       cargaId: null,
+      caixaId: null,
       confirmacaoEntrega: null,
       motivoInsucesso: null,
       pendencias: pendenciasDestino(d.destinoId, d.destinoCandidatos),
@@ -288,6 +302,11 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
         }),
       };
     }
+    case 'CAIXA_DEFINIDA':
+      if (atual.cargaId !== null || (atual.estado !== 'NAO_ATRIBUIDO' && atual.estado !== 'ATRIBUIDO')) {
+        throw new ErroDominio('JA_SAIU_DA_TRIAGEM', 'o pacote já está numa carga: a caixa só muda na triagem, antes do repasse');
+      }
+      return { ...base, caixaId: e.dados.caixa.id };
     case 'CORRECAO_REGISTRADA': {
       const alvo = e.dados.eventoCorrigido.tipo === 'ENTREGA_REGISTRADA' ? 'ENTREGUE' : 'INSUCESSO';
       if (atual.estado !== alvo) {
@@ -303,6 +322,8 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
 export function reconstruir(eventos: Evento[]): Pacote | null {
   return eventos.reduce<Pacote | null>((p, e) => aplicarEvento(p, e), null);
 }
+
+export const rotuloCaixa = (c: CaixaRef) => (c.numero ? `${c.numero} · ${c.nome}` : c.nome);
 
 /** Texto humano da timeline. */
 export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string): string {
@@ -323,7 +344,9 @@ export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string)
     case 'REATRIBUIDO':
       return `Reatribuído: ${e.dados.de.nome} → ${e.dados.para.nome} (responsabilidade transferida)`;
     case 'INCLUIDO_EM_CARGA':
-      return `Incluído na carga ${e.dados.carga.codigo} de ${e.dados.ajudante.nome} (carga montada)`;
+      return `Incluído na carga ${e.dados.carga.codigo} de ${e.dados.ajudante.nome} (carga montada)${e.dados.caixa ? ` — saiu na caixa ${rotuloCaixa(e.dados.caixa)}` : ''}`;
+    case 'CAIXA_DEFINIDA':
+      return `Triagem: colocado na caixa ${rotuloCaixa(e.dados.caixa)}${e.dados.anterior ? ` (estava em ${rotuloCaixa(e.dados.anterior)})` : ''}${e.dados.motivo ? ` — ${e.dados.motivo}` : ''}`;
     case 'RETIRADO_DA_CARGA':
       return `Retirado da carga ${e.dados.carga.codigo} (${e.dados.motivo})`;
     case 'DESATRIBUIDO':

@@ -172,11 +172,32 @@ export function LotePagina({ id }: { id: string }) {
           </tbody>
         </table>
       </div>
+      {v.lote.status === 'CONFIRMADO' && <ResumoCaixas />}
       {v.lote.status === 'CONFIRMADO' && (
         <p>
-          <button type="button" className="primario" onClick={() => ir('/inventario')}>Ver inventário</button>
+          <button type="button" className="primario" onClick={() => ir('/triagem')}>Ir para a triagem</button>{' '}
+          <button type="button" onClick={() => ir('/inventario')}>Ver inventário</button>
         </p>
       )}
     </section>
+  );
+}
+
+/** Depois de importar: quanto o HUB já colocou sozinho nas caixas e quanto espera o Hugo na triagem. */
+function ResumoCaixas() {
+  const t = useCarregar(() => api.triagem(), []);
+  if (!t.dados) return null;
+  const { nasCaixas, aguardandoRevisao, semCaixa } = t.dados;
+  return (
+    <Aviso tipo={aguardandoRevisao ? 'info' : 'ok'}>
+      <b>{nasCaixas}</b> pacote(s) já foram sozinhos para as caixas (o HUB lembrou pela pessoa ou pela rua).{' '}
+      {aguardandoRevisao > 0 ? (
+        <>
+          <b>{aguardandoRevisao}</b> pacote(s), de {semCaixa.length} rua(s), esperam você dizer a caixa na <a href="#/triagem">triagem</a>.
+        </>
+      ) : (
+        'Nada esperando revisão.'
+      )}
+    </Aviso>
   );
 }

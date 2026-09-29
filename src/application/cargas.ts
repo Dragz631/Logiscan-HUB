@@ -8,7 +8,8 @@
  *                         de forma idempotente; o que não puder ser aplicado é RECUSADO com motivo.
  *  5. registrarCorrecao : reverte um desfecho com um evento NOVO (o original nunca é apagado).
  */
-import { SCHEMA_CARGA_V0, type DocumentoCargaV0, type ItemCargaV0 } from '../contracts/cargaV0';
+import { type CaixaCargaV0, SCHEMA_CARGA_V0, type DocumentoCargaV0, type ItemCargaV0 } from '../contracts/cargaV0';
+import type { Regiao } from '../domain/regioes';
 import { lerDocumentoStreetEventos, type EventoStreetV0 } from '../contracts/streetEventosV0';
 import { type Carga, type EventoCarga, type SituacaoCarga, codigoCarga, descreverEventoCarga, prefixoCarga, situacaoCarga } from '../domain/carga';
 import { ErroDominio } from '../domain/eventos';
@@ -166,14 +167,18 @@ export function documentoDaCarga(ctx: Contexto, carga: Carga, agora: string): Do
     .map((id) => ctx.armazem.pacotes.porId(id))
     .filter((p): p is Pacote => !!p && p.cargaId === carga.id && (p.estado === 'EM_ROTA' || p.estado === 'ATRIBUIDO'));
   const identidade = identidadeDaRua(ctx);
+  const caixaDoc = caixaParaCarga(ctx);
   const itens = new Map<string, ItemCargaV0>();
   const linhas = pacotes.map((p) => {
     const rua = identidade(p);
-    const item = itens.get(rua.ruaId) ?? {
-      rua_id: rua.ruaId, rua_nome: rua.ruaNome, regiao_id: rua.regiao?.id ?? null, regiao_nome: rua.regiao?.nome ?? null, pacote_ids: [],
+    const caixa = rua.caixa ? caixaDoc(rua.caixa) : null;
+    // um item = uma rua DENTRO de uma caixa (a mesma rua pode ter pessoas em caixas diferentes)
+    const k = `${caixa?.id ?? ''}|${rua.ruaId}`;
+    const item = itens.get(k) ?? {
+      rua_id: rua.ruaId, rua_nome: rua.ruaNome, regiao_id: rua.regiao?.id ?? null, regiao_nome: rua.regiao?.nome ?? null, caixa, pacote_ids: [],
     };
     item.pacote_ids.push(p.id);
-    itens.set(rua.ruaId, item);
+    itens.set(k, item);
     return {
       hub_pacote_id: p.id,
       transportadora: p.transportadora,
@@ -191,6 +196,7 @@ export function documentoDaCarga(ctx: Contexto, carga: Carga, agora: string): Do
       rua_id: rua.ruaId,
       rua_nome: rua.ruaNome,
       regiao: rua.regiao ? { id: rua.regiao.id, nome: rua.regiao.nome, repasse_unico: rua.regiao.repasseUnico } : null,
+      caixa,
     };
   });
   return {
@@ -207,6 +213,22 @@ export function documentoDaCarga(ctx: Contexto, carga: Carga, agora: string): Do
     ajudante: carga.ajudante,
     pacotes: linhas,
     itens: [...itens.values()],
+  };
+}
+
+/** Caixa como vai na carga: com a caixa que agrupa e os nomes que ela já teve (histórico CAIXA_CONFIGURADA). */
+function caixaParaCarga(ctx: Contexto): (c: Regiao) => CaixaCargaV0 {
+  const cache = new Map<string, CaixaCargaV0>();
+  return (c) => {
+    if (!cache.has(c.id)) {
+      const pai = c.paiId ? ctx.armazem.regioes.porId(c.paiId) : undefined;
+      const antigos = ctx.armazem.regioes
+        .eventos(`caixa:${c.id}`)
+        .flatMap((e) => (e.tipo === 'CAIXA_CONFIGURADA' ? [e.dados.de.nome] : []))
+        .filter((n, i, a) => n !== c.nome && a.indexOf(n) === i);
+      cache.set(c.id, { id: c.id, numero: c.numero, nome: c.nome, pai: pai ? { id: pai.id, nome: pai.nome } : null, nomes_anteriores: antigos });
+    }
+    return cache.get(c.id)!;
   };
 }
 

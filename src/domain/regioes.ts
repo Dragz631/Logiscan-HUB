@@ -20,6 +20,12 @@ export interface Regiao {
   criadaPor: string;
   /** true = no repasse a região inteira vale como UMA rua (ex.: "Diversos"). */
   repasseUnico: boolean;
+  /** CAIXA oficial (V0.5): número como o Hugo chama ("1", "1.2", "10.1"); null = região sem número. */
+  numero: string | null;
+  /** Ordem de exibição das caixas. */
+  ordem: number | null;
+  /** Caixa que agrupa esta (ex.: "Associações" agrupa as 4 associações). */
+  paiId: string | null;
 }
 
 export interface Associacao {
@@ -63,20 +69,30 @@ export function decidirAssociacao(
   return substituirConfirmado ? 'substituir' : 'conflito';
 }
 
-export interface EventoRegiao {
-  id: string;
-  ruaChave: string;
-  tipo: 'REGIAO_DEFINIDA';
-  dados: {
-    rua: { chave: string; nome: string };
-    de: string | null | undefined;
-    para: string | null;
-    /** Mudança de especificidade (quando houve). */
-    prioridade?: { de: number | null | undefined; para: number | null };
-  };
-  ator: string;
-  ocorridoEm: string;
-}
+export type EventoRegiao =
+  | {
+      id: string;
+      ruaChave: string;
+      tipo: 'REGIAO_DEFINIDA';
+      dados: {
+        rua: { chave: string; nome: string };
+        de: string | null | undefined;
+        para: string | null;
+        /** Mudança de especificidade (quando houve). */
+        prioridade?: { de: number | null | undefined; para: number | null };
+      };
+      ator: string;
+      ocorridoEm: string;
+    }
+  /** Caixa configurada pelo catálogo (nome/número/agrupamento). `ruaChave` = `caixa:<id>`. */
+  | {
+      id: string;
+      ruaChave: string;
+      tipo: 'CAIXA_CONFIGURADA';
+      dados: { caixa: string; de: { nome: string; numero: string | null; paiId: string | null }; para: { nome: string; numero: string | null; paiId: string | null } };
+      ator: string;
+      ocorridoEm: string;
+    };
 
 // ---------------------------------------------------------------------------
 // Rua operacional (conhecimento configurável de especificidade)

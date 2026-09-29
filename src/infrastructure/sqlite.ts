@@ -13,6 +13,7 @@ import type {
   Lote,
   RepositorioAjudantes,
   RepositorioCargas,
+  RepositorioPessoas,
   RepositorioRegioes,
   RepositorioDestinos,
   RepositorioEventos,
@@ -23,6 +24,7 @@ import type {
 import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
+import type { EventoPessoa, MemoriaPessoa } from '../domain/caixas';
 import { chaveTexto } from '../domain/destino/texto';
 import type { Evento } from '../domain/eventos';
 import type { Pacote } from '../domain/pacote';
@@ -77,6 +79,7 @@ function pacoteDaLinha(r: Linha): Pacote {
     estado: String(r.estado) as Pacote['estado'],
     responsavelId: str(r.responsavel_id),
     cargaId: str(r.carga_id),
+    caixaId: str(r.caixa_id),
     confirmacaoEntrega: r.confirmacao_entrega ? parse(r.confirmacao_entrega) : null,
     motivoInsucesso: str(r.motivo_insucesso),
     pendencias: parse(r.pendencias),
@@ -134,15 +137,16 @@ class Pacotes implements RepositorioPacotes {
       p.dados.complemento, p.dados.bairro, p.dados.cidade, p.dados.uf, p.dados.cep, p.destinoId,
       json(p.destinoCandidatos), p.estado, p.responsavelId, json(p.pendencias), p.origem.loteId,
       p.origem.arquivo, p.origem.card, p.criadoEm, p.atualizadoEm, p.versao, p.cargaId,
-      p.confirmacaoEntrega ? json(p.confirmacaoEntrega) : null, p.motivoInsucesso,
+      p.confirmacaoEntrega ? json(p.confirmacaoEntrega) : null, p.motivoInsucesso, p.caixaId,
     ];
     if (versaoEsperada === null) {
       this.db
         .prepare(
           `INSERT INTO pacotes (transportadora, codigo, destinatario, rua, rua_detalhe, numero, complemento, bairro,
             cidade, uf, cep, destino_id, destino_candidatos, estado, responsavel_id, pendencias, origem_lote_id,
-            origem_arquivo, origem_card, criado_em, atualizado_em, versao, carga_id, confirmacao_entrega, motivo_insucesso, id)
-           VALUES (${new Array(26).fill('?').join(',')})`,
+            origem_arquivo, origem_card, criado_em, atualizado_em, versao, carga_id, confirmacao_entrega, motivo_insucesso,
+            caixa_id, id)
+           VALUES (${new Array(27).fill('?').join(',')})`,
         )
         .run(...valores, p.id);
       return;
@@ -152,7 +156,7 @@ class Pacotes implements RepositorioPacotes {
         `UPDATE pacotes SET transportadora=?, codigo=?, destinatario=?, rua=?, rua_detalhe=?, numero=?, complemento=?,
           bairro=?, cidade=?, uf=?, cep=?, destino_id=?, destino_candidatos=?, estado=?, responsavel_id=?, pendencias=?,
           origem_lote_id=?, origem_arquivo=?, origem_card=?, criado_em=?, atualizado_em=?, versao=?, carga_id=?,
-          confirmacao_entrega=?, motivo_insucesso=?
+          confirmacao_entrega=?, motivo_insucesso=?, caixa_id=?
          WHERE id=? AND versao=?`,
       )
       .run(...valores, p.id, versaoEsperada);
@@ -463,6 +467,9 @@ class Regioes implements RepositorioRegioes {
   private regiao = (r: Linha): Regiao => ({
     id: String(r.id), nome: String(r.nome), criadaEm: String(r.criada_em), criadaPor: String(r.criada_por),
     repasseUnico: Number(r.repasse_unico ?? 0) === 1,
+    numero: str(r.numero),
+    ordem: r.ordem === null || r.ordem === undefined ? null : Number(r.ordem),
+    paiId: str(r.pai_id),
   });
   private assoc = (r: Linha): Associacao => ({
     ruaChave: String(r.rua_chave), ruaNome: String(r.rua_nome), regiaoId: str(r.regiao_id),
@@ -471,7 +478,10 @@ class Regioes implements RepositorioRegioes {
   });
 
   listar() {
-    return this.db.prepare('SELECT * FROM regioes ORDER BY nome COLLATE NOCASE').all().map(this.regiao);
+    return this.db
+      .prepare('SELECT * FROM regioes ORDER BY ordem IS NULL, ordem, nome COLLATE NOCASE')
+      .all()
+      .map(this.regiao);
   }
   porId(id: string) {
     const r = this.db.prepare('SELECT * FROM regioes WHERE id = ?').get(id);
@@ -483,8 +493,13 @@ class Regioes implements RepositorioRegioes {
   }
   criar(r: Regiao) {
     this.db
-      .prepare('INSERT INTO regioes (id, nome, criada_em, criada_por, repasse_unico) VALUES (?,?,?,?,?)')
-      .run(r.id, r.nome, r.criadaEm, r.criadaPor, r.repasseUnico ? 1 : 0);
+      .prepare('INSERT INTO regioes (id, nome, criada_em, criada_por, repasse_unico, numero, ordem, pai_id) VALUES (?,?,?,?,?,?,?,?)')
+      .run(r.id, r.nome, r.criadaEm, r.criadaPor, r.repasseUnico ? 1 : 0, r.numero, r.ordem, r.paiId);
+  }
+  configurarCaixa(id: string, c: { nome: string; numero: string | null; ordem: number | null; paiId: string | null; repasseUnico: boolean }) {
+    this.db
+      .prepare('UPDATE regioes SET nome=?, numero=?, ordem=?, pai_id=?, repasse_unico=? WHERE id=?')
+      .run(c.nome, c.numero, c.ordem, c.paiId, c.repasseUnico ? 1 : 0, id);
   }
   associacoes() {
     return new Map(this.db.prepare('SELECT * FROM regioes_ruas').all().map((r) => [String(r.rua_chave), this.assoc(r)] as const));
@@ -512,9 +527,46 @@ class Regioes implements RepositorioRegioes {
       .prepare('SELECT * FROM eventos_regiao WHERE rua_chave = ? ORDER BY seq')
       .all(ruaChave)
       .map((r) => ({
-        id: String(r.id), ruaChave: String(r.rua_chave), tipo: 'REGIAO_DEFINIDA' as const,
+        id: String(r.id), ruaChave: String(r.rua_chave), tipo: String(r.tipo),
         dados: parse(r.dados), ator: String(r.ator), ocorridoEm: String(r.ocorrido_em),
       }) as EventoRegiao);
+  }
+}
+
+class Pessoas implements RepositorioPessoas {
+  constructor(private db: DatabaseSync) {}
+
+  private linha = (r: Linha): MemoriaPessoa => ({
+    chave: String(r.chave), nome: String(r.nome), ruaId: String(r.rua_id), ruaNome: String(r.rua_nome), cep: String(r.cep),
+    caixaId: String(r.caixa_id), definidaEm: String(r.definida_em), definidaPor: String(r.definida_por),
+  });
+
+  todas() {
+    return new Map(this.db.prepare('SELECT * FROM memoria_pessoas').all().map((r) => [String(r.chave), this.linha(r)] as const));
+  }
+  porChave(chave: string) {
+    const r = this.db.prepare('SELECT * FROM memoria_pessoas WHERE chave = ?').get(chave);
+    return r ? this.linha(r) : undefined;
+  }
+  definir(m: MemoriaPessoa) {
+    this.db
+      .prepare(
+        `INSERT INTO memoria_pessoas (chave, nome, rua_id, rua_nome, cep, caixa_id, definida_em, definida_por) VALUES (?,?,?,?,?,?,?,?)
+         ON CONFLICT (chave) DO UPDATE SET nome=excluded.nome, rua_nome=excluded.rua_nome, cep=excluded.cep,
+           caixa_id=excluded.caixa_id, definida_em=excluded.definida_em, definida_por=excluded.definida_por`,
+      )
+      .run(m.chave, m.nome, m.ruaId, m.ruaNome, m.cep, m.caixaId, m.definidaEm, m.definidaPor);
+  }
+  anexarEvento(e: EventoPessoa) {
+    this.db
+      .prepare('INSERT INTO eventos_pessoa (id, chave, tipo, dados, ator, ocorrido_em) VALUES (?,?,?,?,?,?)')
+      .run(e.id, e.chave, e.tipo, json(e.dados), e.ator, e.ocorridoEm);
+  }
+  eventos(chave: string) {
+    return this.db
+      .prepare('SELECT * FROM eventos_pessoa WHERE chave = ? ORDER BY seq')
+      .all(chave)
+      .map((r) => ({ id: String(r.id), chave: String(r.chave), tipo: 'PESSOA_NA_CAIXA' as const, dados: parse(r.dados), ator: String(r.ator), ocorridoEm: String(r.ocorrido_em) }) as EventoPessoa);
   }
 }
 
@@ -528,6 +580,7 @@ export function criarArmazemSqlite(db: DatabaseSync): Armazem {
     ajudantes: new Ajudantes(db),
     cargas: new Cargas(db),
     regioes: new Regioes(db),
+    pessoas: new Pessoas(db),
     transacao<T>(fn: () => T): T {
       if (profundidade > 0) return fn(); // já dentro de uma transação
       db.exec('BEGIN IMMEDIATE');

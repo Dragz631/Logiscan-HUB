@@ -33,10 +33,11 @@ import {
   finalizarRota,
   listarPerfis,
   listarRuas,
-  agruparEmUnidades,
+  listarUnidades,
   removerRuaDaCarga,
 } from '../application/orquestracao';
 import { criarRegiao, definirRegiao, listarRegioes, mapaDeRegioes } from '../application/regioes';
+import { classificarPacote, classificarRua, pacotesDaCaixa, visaoTriagem } from '../application/triagem';
 import { criarRotasStreet } from './street';
 import type { Contexto } from '../application/portas';
 import { ErroDominio } from '../domain/eventos';
@@ -71,6 +72,10 @@ const Esquemas = {
     substituir: z.boolean().optional(),
     prioridade: z.number().int().positive().nullable().optional(),
   }),
+  triagemRua: z.object({ rua: z.string().min(1), caixaId: z.string().min(1), ator, substituir: z.boolean().optional() }),
+  triagemPacote: z.object({
+    pacoteId: z.string().min(1), caixaId: z.string().min(1), ator, substituir: z.boolean().optional(), motivo: z.string().optional(),
+  }),
   removerRua: z.object({ rua: z.string().min(1), ator, paraAjudanteId: z.string().optional() }),
   filtro: z.object({
     estado: z.enum(ESTADOS).optional(),
@@ -98,7 +103,15 @@ export function criarApi(ctx: Contexto): express.Router {
   // ---- Orquestrador ----
   api.get('/orquestrador', (_req, res) => {
     const ruas = listarRuas(ctx);
-    res.json({ ruas, unidades: agruparEmUnidades(ruas), perfis: listarPerfis(ctx), regioes: listarRegioes(ctx) });
+    // pacotes ainda SEM CAIXA: esperam a revisão do Hugo na triagem (não vão para ajudante)
+    const semCaixa = ruas.filter((r) => r.chave.startsWith('sem:'));
+    res.json({
+      ruas,
+      unidades: listarUnidades(ctx),
+      perfis: listarPerfis(ctx),
+      regioes: listarRegioes(ctx),
+      aguardandoRevisao: { pacotes: semCaixa.reduce((n, r) => n + r.disponiveis, 0), ruas: semCaixa.filter((r) => r.disponiveis > 0).length },
+    });
   });
 
   api.post('/regioes', (req, res) => {
@@ -119,6 +132,22 @@ export function criarApi(ctx: Contexto): express.Router {
   /** Confirma o plano de repasses da tela (várias ruas → vários ajudantes), tudo ou nada. */
   api.post('/orquestrador/repasses', (req, res) => {
     res.json(confirmarRepasses(ctx, corpo(Esquemas.repasses, req.body)));
+  });
+
+  /** TRIAGEM: a mesa das caixas — o que já está em caixa e o que espera a revisão do Hugo. */
+  api.get('/triagem', (_req, res) => {
+    res.json(visaoTriagem(ctx));
+  });
+  api.get('/triagem/caixas/:id', (req, res) => {
+    res.json(pacotesDaCaixa(ctx, req.params.id));
+  });
+  /** "Esta rua vai nesta caixa" (memória da rua). Conflito volta { ok: false, conflito }. */
+  api.post('/triagem/rua', (req, res) => {
+    res.json(classificarRua(ctx, corpo(Esquemas.triagemRua, req.body)));
+  });
+  /** "Este pacote/pessoa vai nesta caixa" (exceção da pessoa). Conflito volta { ok: false, conflito }. */
+  api.post('/triagem/pacote', (req, res) => {
+    res.json(classificarPacote(ctx, corpo(Esquemas.triagemPacote, req.body)));
   });
 
   api.post('/orquestrador/atribuir', (req, res) => {
