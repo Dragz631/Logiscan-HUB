@@ -14,6 +14,7 @@ import type {
   Lote,
   RepositorioAjudantes,
   RepositorioCargas,
+  RepositorioContas,
   RepositorioDias,
   RepositorioPessoas,
   RepositorioRegioes,
@@ -27,6 +28,7 @@ import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
 import type { EventoPessoa, MemoriaPessoa } from '../domain/caixas';
+import type { Conta, EventoConta, Sessao } from '../domain/contas';
 import type { Dia } from '../domain/dias';
 import { chaveTexto } from '../domain/destino/texto';
 import type { Evento } from '../domain/eventos';
@@ -412,6 +414,113 @@ class Dias implements RepositorioDias {
   }
 }
 
+class Contas implements RepositorioContas {
+  constructor(private db: Db) {}
+
+  private linha = (r: Linha): Conta => ({
+    id: String(r.id),
+    usuario: String(r.usuario),
+    nome: String(r.nome),
+    telefone: str(r.telefone),
+    veiculo: str(r.veiculo),
+    pinHash: str(r.pin_hash),
+    situacao: String(r.situacao) as Conta['situacao'],
+    papel: str(r.papel) as Conta['papel'],
+    master: Number(r.master) === 1,
+    ajudanteId: str(r.ajudante_id),
+    ativacaoHash: str(r.ativacao_hash),
+    ativacaoExpiraEm: str(r.ativacao_expira_em),
+    tentativas: Number(r.tentativas),
+    bloqueadaAte: str(r.bloqueada_ate),
+    criadaEm: String(r.criada_em),
+    decididaEm: str(r.decidida_em),
+    decididaPor: str(r.decidida_por),
+  });
+
+  private sessao = (r: Linha): Sessao => ({
+    tokenHash: String(r.token_hash),
+    renovarHash: String(r.renovar_hash),
+    contaId: String(r.conta_id),
+    criadaEm: String(r.criada_em),
+    expiraEm: String(r.expira_em),
+    renovarExpiraEm: String(r.renovar_expira_em),
+    revogadaEm: str(r.revogada_em),
+  });
+
+  porId(id: string) {
+    const r = this.db.prepare('SELECT * FROM contas WHERE id = ?').get(id);
+    return r ? this.linha(r) : undefined;
+  }
+  porUsuario(usuario: string) {
+    const r = this.db.prepare('SELECT * FROM contas WHERE usuario = ?').get(usuario);
+    return r ? this.linha(r) : undefined;
+  }
+  porAjudante(ajudanteId: string) {
+    const r = this.db.prepare('SELECT * FROM contas WHERE ajudante_id = ?').get(ajudanteId);
+    return r ? this.linha(r) : undefined;
+  }
+  listar() {
+    return this.db
+      .prepare("SELECT * FROM contas ORDER BY (situacao = 'PENDENTE') DESC, criada_em DESC, id")
+      .all()
+      .map(this.linha);
+  }
+  criar(c: Conta) {
+    this.db
+      .prepare(
+        `INSERT INTO contas (id, usuario, nome, telefone, veiculo, pin_hash, situacao, papel, master, ajudante_id,
+           ativacao_hash, ativacao_expira_em, tentativas, bloqueada_ate, criada_em, decidida_em, decidida_por)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      )
+      .run(
+        c.id, c.usuario, c.nome, c.telefone, c.veiculo, c.pinHash, c.situacao, c.papel, c.master ? 1 : 0, c.ajudanteId,
+        c.ativacaoHash, c.ativacaoExpiraEm, c.tentativas, c.bloqueadaAte, c.criadaEm, c.decididaEm, c.decididaPor,
+      );
+  }
+  atualizar(c: Conta) {
+    this.db
+      .prepare(
+        `UPDATE contas SET nome=?, telefone=?, veiculo=?, pin_hash=?, situacao=?, papel=?, master=?, ajudante_id=?,
+           ativacao_hash=?, ativacao_expira_em=?, tentativas=?, bloqueada_ate=?, decidida_em=?, decidida_por=?
+         WHERE id=?`,
+      )
+      .run(
+        c.nome, c.telefone, c.veiculo, c.pinHash, c.situacao, c.papel, c.master ? 1 : 0, c.ajudanteId,
+        c.ativacaoHash, c.ativacaoExpiraEm, c.tentativas, c.bloqueadaAte, c.decididaEm, c.decididaPor, c.id,
+      );
+  }
+  criarSessao(s: Sessao) {
+    this.db
+      .prepare('INSERT INTO sessoes (token_hash, renovar_hash, conta_id, criada_em, expira_em, renovar_expira_em, revogada_em) VALUES (?,?,?,?,?,?,?)')
+      .run(s.tokenHash, s.renovarHash, s.contaId, s.criadaEm, s.expiraEm, s.renovarExpiraEm, s.revogadaEm);
+  }
+  sessaoPorToken(tokenHash: string) {
+    const r = this.db.prepare('SELECT * FROM sessoes WHERE token_hash = ?').get(tokenHash);
+    return r ? this.sessao(r) : undefined;
+  }
+  sessaoPorRenovar(renovarHash: string) {
+    const r = this.db.prepare('SELECT * FROM sessoes WHERE renovar_hash = ?').get(renovarHash);
+    return r ? this.sessao(r) : undefined;
+  }
+  revogarSessao(tokenHash: string, em: string) {
+    this.db.prepare('UPDATE sessoes SET revogada_em = ? WHERE token_hash = ? AND revogada_em IS NULL').run(em, tokenHash);
+  }
+  revogarSessoesDaConta(contaId: string, em: string) {
+    this.db.prepare('UPDATE sessoes SET revogada_em = ? WHERE conta_id = ? AND revogada_em IS NULL').run(em, contaId);
+  }
+  anexarHistorico(e: EventoConta) {
+    this.db
+      .prepare('INSERT INTO contas_historico (id, conta_id, tipo, dados, ator, ocorrido_em) VALUES (?,?,?,?,?,?)')
+      .run(e.id, e.contaId, e.tipo, json(e.dados), e.ator, e.ocorridoEm);
+  }
+  historico(contaId: string) {
+    return this.db
+      .prepare('SELECT * FROM contas_historico WHERE conta_id = ? ORDER BY seq')
+      .all(contaId)
+      .map((r) => ({ id: String(r.id), contaId: String(r.conta_id), tipo: String(r.tipo) as EventoConta['tipo'], dados: parse<Record<string, unknown>>(r.dados), ator: String(r.ator), ocorridoEm: String(r.ocorrido_em) }));
+  }
+}
+
 class Cargas implements RepositorioCargas {
   constructor(private db: Db) {}
 
@@ -631,6 +740,7 @@ export function criarArmazemSqlite(db: Db, dialeto: Dialeto = 'sqlite'): Armazem
     regioes: new Regioes(db),
     pessoas: new Pessoas(db),
     dias: new Dias(db),
+    contas: new Contas(db),
     transacao<T>(fn: () => T): T {
       if (profundidade > 0) return fn(); // já dentro de uma transação
       if (dialeto === 'postgres') {

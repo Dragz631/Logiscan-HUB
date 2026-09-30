@@ -14,3 +14,10 @@ dados-v05-teste/
 dados-backup-20260930/
 dados-v06-teste/
 dados-v07-teste/
+dados-backup-*/
+dados-v08-teste/
+.env
+.env.*
+!.env.example
+.vercel
+api/

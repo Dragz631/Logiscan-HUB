@@ -65,11 +65,16 @@ export function migrarPg(db: BancoPg, reiniciar = false): void {
   if (reiniciar) db.exec('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   db.exec('CREATE TABLE IF NOT EXISTS migracoes (nome TEXT PRIMARY KEY, aplicada_em TEXT NOT NULL)');
   db.exec('ALTER TABLE migracoes ENABLE ROW LEVEL SECURITY'); // sem política: a API pública do Supabase não enxerga
-  const aplicadas = new Set(db.prepare('SELECT nome FROM migracoes').all().map((r) => String(r.nome)));
   for (const nome of readdirSync(PASTA_MIGRACOES).filter((f) => f.endsWith('.sql')).sort()) {
-    if (aplicadas.has(nome)) continue;
     db.exec('BEGIN');
     try {
+      // Trava por transação (o pooler do Supabase não garante a mesma conexão entre comandos soltos): duas
+      // instâncias subindo juntas não aplicam a mesma migração duas vezes.
+      db.exec('SELECT pg_advisory_xact_lock(7300002)');
+      if (db.prepare('SELECT 1 AS ok FROM migracoes WHERE nome = ?').get(nome)) {
+        db.exec('COMMIT');
+        continue;
+      }
       db.exec(readFileSync(PASTA_MIGRACOES + nome, 'utf8'));
       db.prepare('INSERT INTO migracoes (nome, aplicada_em) VALUES (?, ?)').run(nome, new Date().toISOString());
       db.exec('COMMIT');

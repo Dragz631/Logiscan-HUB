@@ -40,6 +40,8 @@ import { criarRegiao, definirRegiao, listarRegioes, mapaDeRegioes } from '../app
 import { classificarPacote, classificarRua, pacotesDaCaixa, visaoTriagem } from '../application/triagem';
 import { detalharDia, encerrarDia, listarDias, previaNovoDia } from '../application/novoDia';
 import { pendenciasDaRota, repassarRota } from '../application/repasseRota';
+import { aprovarConta, autenticar, listarContas, recusarConta } from '../application/contas';
+import { loginObrigatorio, exigirAdmin, exigirMaster, lerToken } from './autenticacao';
 import { criarRotasStreet } from './street';
 import type { Contexto } from '../application/portas';
 import { ErroDominio } from '../domain/eventos';
@@ -48,6 +50,11 @@ import { ESTADOS } from '../domain/pacote';
 const ator = z.string().trim().min(1, 'informe quem está operando');
 
 const Esquemas = {
+  papelDaConta: z.object({
+    como: z.enum(['AJUDANTE', 'ADMIN', 'ADMIN_AJUDANTE']),
+    ajudanteId: z.string().nullish().transform((v) => v ?? undefined),
+    criarPerfilNovo: z.boolean().optional(),
+  }),
   importar: z.object({ arquivo: z.string().min(1), conteudo: z.string().min(1) }),
   decisao: z.object({ decisao: z.enum(['manter_atual', 'aceitar_novo']) }),
   confirmar: z.object({ ator }),
@@ -115,6 +122,28 @@ export function criarApi(ctx: Contexto): express.Router {
 
   // Transporte direto HUB ↔ Street (o arquivo continua como fallback)
   api.use('/street', criarRotasStreet(ctx));
+
+  /** Quem está logado (a tela do HUB pergunta ao abrir). Sem login obrigatório (HUB local): semLogin. */
+  api.get('/eu', (req, res) => {
+    if (!loginObrigatorio()) return res.json({ semLogin: true });
+    const conta = autenticar(ctx, lerToken(req));
+    res.json({ semLogin: false, perfil: { id: conta.ajudanteId, nome: conta.nome, papel: conta.papel, master: conta.master } });
+  });
+
+  // Daqui para baixo, com login obrigatório: só conta APROVADA com papel ADMIN. Sem isso, nada responde.
+  api.use(exigirAdmin(ctx));
+
+  // ---- Contas (só a master) ----
+  api.get('/contas', exigirMaster(ctx), (_req, res) => {
+    res.json(listarContas(ctx, res.locals.conta));
+  });
+  api.post('/contas/:id/aprovar', exigirMaster(ctx), (req, res) => {
+    const b = corpo(Esquemas.papelDaConta, req.body);
+    res.json(aprovarConta(ctx, res.locals.conta, { contaId: req.params.id as string, como: b.como, ajudanteId: b.ajudanteId, criarPerfilNovo: b.criarPerfilNovo }));
+  });
+  api.post('/contas/:id/recusar', exigirMaster(ctx), (req, res) => {
+    res.json(recusarConta(ctx, res.locals.conta, req.params.id as string));
+  });
 
   // ---- Orquestrador ----
   api.get('/orquestrador', (_req, res) => {
@@ -311,18 +340,18 @@ export function criarApi(ctx: Contexto): express.Router {
     // Erros do próprio corpo HTTP (antes de qualquer regra): não são erro de contrato nem erro interno.
     const tipoCorpo = (err as { type?: string } | null)?.type;
     if (tipoCorpo === 'entity.too.large') {
-      return res.status(413).json({ erro: 'ARQUIVO_GRANDE_DEMAIS', mensagem: 'o arquivo passa do limite de 25 MB aceito pelo HUB' });
+      return res.status(413).json({ erro: 'ARQUIVO_GRANDE_DEMAIS', codigo: 'ARQUIVO_GRANDE_DEMAIS', mensagem: 'o arquivo passa do limite de 25 MB aceito pelo HUB' });
     }
     if (tipoCorpo === 'entity.parse.failed') {
-      return res.status(400).json({ erro: 'CORPO_INVALIDO', mensagem: 'o pedido chegou corrompido (JSON do corpo inválido)' });
+      return res.status(400).json({ erro: 'CORPO_INVALIDO', codigo: 'CORPO_INVALIDO', mensagem: 'o pedido chegou corrompido (JSON do corpo inválido)' });
     }
-    if (err instanceof ErroAplicacao) return res.status(err.status).json({ erro: err.codigo, mensagem: err.message });
-    if (err instanceof ErroDominio) return res.status(409).json({ erro: err.codigo, mensagem: err.message });
+    if (err instanceof ErroAplicacao) return res.status(err.status).json({ erro: err.codigo, codigo: err.codigo, mensagem: err.message, ...err.extra });
+    if (err instanceof ErroDominio) return res.status(409).json({ erro: err.codigo, codigo: err.codigo, mensagem: err.message });
     if (err instanceof z.ZodError) {
-      return res.status(400).json({ erro: 'ENTRADA_INVALIDA', mensagem: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
+      return res.status(400).json({ erro: 'ENTRADA_INVALIDA', codigo: 'ENTRADA_INVALIDA', mensagem: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') });
     }
     console.error(err);
-    return res.status(500).json({ erro: 'INTERNO', mensagem: 'erro inesperado no HUB (veja o terminal)' });
+    return res.status(500).json({ erro: 'INTERNO', codigo: 'INTERNO', mensagem: 'erro inesperado no HUB (veja o terminal)' });
   });
 
   return api;

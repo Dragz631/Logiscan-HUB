@@ -6,6 +6,7 @@ import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
 import type { EventoPessoa, MemoriaPessoa } from '../domain/caixas';
+import type { Conta, EventoConta, Sessao } from '../domain/contas';
 import type { Dia } from '../domain/dias';
 import type { Evento } from '../domain/eventos';
 import type { DecisaoConflito, ItemPrevia } from '../domain/importacao';
@@ -104,6 +105,23 @@ export interface RepositorioDias {
   porChave(chave: string): Dia | undefined;
 }
 
+/** Contas (login), sessões e o histórico das decisões sobre contas (append-only). */
+export interface RepositorioContas {
+  porId(id: string): Conta | undefined;
+  porUsuario(usuario: string): Conta | undefined;
+  porAjudante(ajudanteId: string): Conta | undefined;
+  listar(): Conta[];
+  criar(c: Conta): void;
+  atualizar(c: Conta): void;
+  criarSessao(s: Sessao): void;
+  sessaoPorToken(tokenHash: string): Sessao | undefined;
+  sessaoPorRenovar(renovarHash: string): Sessao | undefined;
+  revogarSessao(tokenHash: string, em: string): void;
+  revogarSessoesDaConta(contaId: string, em: string): void;
+  anexarHistorico(e: EventoConta): void;
+  historico(contaId: string): EventoConta[];
+}
+
 export interface RepositorioCargas {
   porId(id: string): Carga | undefined;
   listar(): Carga[];
@@ -157,6 +175,7 @@ export interface Armazem {
   regioes: RepositorioRegioes;
   pessoas: RepositorioPessoas;
   dias: RepositorioDias;
+  contas: RepositorioContas;
   transacao<T>(fn: () => T): T;
 }
 
