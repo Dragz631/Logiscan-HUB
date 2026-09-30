@@ -1,14 +1,59 @@
-/** Utilidades de teste: contexto em memória com relógio e IDs determinísticos. */
+/**
+ * Utilidades de teste: contexto com relógio e IDs determinísticos.
+ * Por padrão o banco é SQLite em memória. Com `TESTE_BANCO=pg` (npm run test:pg) os MESMOS testes rodam contra um
+ * Postgres de verdade (PGlite servindo o protocolo numa porta local), o que prova que os dois motores se comportam igual.
+ */
+import { spawn } from 'node:child_process';
 import type { Contexto } from '../src/application/portas';
 import { criarRegiao, definirRegiao } from '../src/application/regioes';
 import { chaveRua } from '../src/domain/ruas';
+import type { Db, Dialeto } from '../src/infrastructure/banco';
+import { BancoPg, migrarPg } from '../src/infrastructure/postgres/bancoPg';
+import { PonteSincrona } from '../src/infrastructure/postgres/ponteSincrona';
 import { abrirBanco, criarArmazemSqlite } from '../src/infrastructure/sqlite';
+
+export const DIALETO_DE_TESTE: Dialeto = process.env.TESTE_BANCO === 'pg' ? 'postgres' : 'sqlite';
+
+let bancoPg: BancoPg | undefined;
+
+/** Sobe (uma vez por processo de teste) um Postgres local e espera ele aceitar conexão, tudo de forma síncrona. */
+function bancoPgDeTeste(): BancoPg {
+  if (bancoPg) return bancoPg;
+  const porta = 50000 + Math.floor(Math.random() * 10000);
+  const filho = spawn(process.execPath, ['scripts/servidor-pglite.mjs', String(porta), String(process.pid)], { stdio: 'ignore' });
+  filho.unref();
+  process.on('exit', () => filho.kill('SIGTERM'));
+  const url = `postgres://postgres:postgres@127.0.0.1:${porta}/postgres`;
+  const limite = Date.now() + 60_000;
+  for (;;) {
+    const ponte = new PonteSincrona({ url, tempoMaximoMs: 5_000 });
+    try {
+      ponte.consulta('SELECT 1');
+      bancoPg = new BancoPg(ponte);
+      return bancoPg;
+    } catch (e) {
+      ponte.fechar();
+      if (Date.now() > limite) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); // espera 300 ms e tenta de novo
+    }
+  }
+}
+
+/** Um banco novo e vazio, já com todas as migrações, no motor escolhido para os testes. */
+export function bancoDeTeste(): Db {
+  if (DIALETO_DE_TESTE === 'postgres') {
+    const db = bancoPgDeTeste();
+    migrarPg(db, true);
+    return db;
+  }
+  return abrirBanco(':memory:');
+}
 
 export function contextoDeTeste(): Contexto & { avancar(min: number): void } {
   let t = Date.parse('2026-09-23T13:00:00Z');
   let n = 0;
   return {
-    armazem: criarArmazemSqlite(abrirBanco(':memory:')),
+    armazem: criarArmazemSqlite(bancoDeTeste(), DIALETO_DE_TESTE),
     relogio: { agora: () => new Date(t).toISOString() },
     ids: { novo: () => `id-${String(++n).padStart(4, '0')}` },
     avancar(min: number) {

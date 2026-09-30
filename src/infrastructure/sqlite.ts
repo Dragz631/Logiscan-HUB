@@ -4,6 +4,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
+import type { Db, Dialeto } from './banco';
 import { fileURLToPath } from 'node:url';
 import type {
   Ajudante,
@@ -98,7 +99,10 @@ function pacoteDaLinha(r: Linha): Pacote {
 }
 
 class Pacotes implements RepositorioPacotes {
-  constructor(private db: DatabaseSync) {}
+  constructor(
+    private db: Db,
+    private dialeto: Dialeto = 'sqlite',
+  ) {}
 
   porId(id: string) {
     const r = this.db.prepare('SELECT * FROM pacotes WHERE id = ?').get(id);
@@ -108,6 +112,11 @@ class Pacotes implements RepositorioPacotes {
   porChave(transportadora: string, codigo: string) {
     const r = this.db.prepare('SELECT * FROM pacotes WHERE transportadora = ? AND codigo = ?').get(transportadora, codigo);
     return r ? pacoteDaLinha(r) : undefined;
+  }
+
+  /** Prefixo numérico do número da casa (12A → 12; sem número → 0), igual nos dois motores. */
+  private numeroInteiro() {
+    return this.dialeto === 'postgres' ? "COALESCE(NULLIF(substring(numero from '^[0-9]+'), '')::bigint, 0)" : 'CAST(numero AS INTEGER)';
   }
 
   listar(f: FiltroPacotes = {}) {
@@ -120,7 +129,7 @@ class Pacotes implements RepositorioPacotes {
     if (f.destinoId) (onde.push('destino_id = ?'), args.push(f.destinoId));
     const sql =
       `SELECT * FROM pacotes ${onde.length ? `WHERE ${onde.join(' AND ')}` : ''} ` +
-      'ORDER BY rua COLLATE NOCASE, CAST(numero AS INTEGER), numero, complemento, codigo';
+      `ORDER BY lower(rua), ${this.numeroInteiro()}, numero, complemento, codigo`;
     let lista = this.db.prepare(sql).all(...args).map(pacoteDaLinha);
     if (f.busca) {
       // Busca sem acento/maiúscula, em código, destinatário, rua e complemento.
@@ -183,7 +192,7 @@ function eventoDaLinha(r: Linha): Evento {
 }
 
 class Eventos implements RepositorioEventos {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   anexar(e: Evento) {
     const existente = this.porChave(e.chaveIdempotencia);
@@ -221,7 +230,7 @@ function destinoDaLinha(r: Linha): Destino {
 }
 
 class Destinos implements RepositorioDestinos {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   porId(id: string) {
     const r = this.db.prepare('SELECT * FROM destinos WHERE id = ?').get(id);
@@ -279,7 +288,7 @@ function itemDaLinha(r: Linha): ItemLote {
 }
 
 class Lotes implements RepositorioLotes {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   porId(id: string) {
     const r = this.db.prepare('SELECT * FROM lotes WHERE id = ?').get(id);
@@ -335,7 +344,7 @@ class Lotes implements RepositorioLotes {
 }
 
 class Ajudantes implements RepositorioAjudantes {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   private linha = (r: Linha): Ajudante => ({
     id: String(r.id),
@@ -352,7 +361,7 @@ class Ajudantes implements RepositorioAjudantes {
   }
 
   listar() {
-    return this.db.prepare('SELECT * FROM ajudantes ORDER BY nome COLLATE NOCASE').all().map(this.linha);
+    return this.db.prepare('SELECT * FROM ajudantes ORDER BY lower(nome)').all().map(this.linha);
   }
 
   criar(a: Ajudante) {
@@ -373,7 +382,7 @@ class Ajudantes implements RepositorioAjudantes {
 }
 
 class Dias implements RepositorioDias {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   private linha = (r: Linha): Dia => ({
     id: String(r.id),
@@ -404,7 +413,7 @@ class Dias implements RepositorioDias {
 }
 
 class Cargas implements RepositorioCargas {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   private montar = (r: Linha): Carga => ({
     id: String(r.id),
@@ -466,7 +475,7 @@ class Cargas implements RepositorioCargas {
   adicionarPacotes(cargaId: string, pacoteIds: string[]) {
     const r = this.db.prepare('SELECT COALESCE(MAX(ordem), -1) AS m FROM cargas_pacotes WHERE carga_id = ?').get(cargaId);
     let ordem = Number(r?.m ?? -1) + 1;
-    const ins = this.db.prepare('INSERT OR IGNORE INTO cargas_pacotes (carga_id, pacote_id, ordem) VALUES (?,?,?)');
+    const ins = this.db.prepare('INSERT INTO cargas_pacotes (carga_id, pacote_id, ordem) VALUES (?,?,?) ON CONFLICT DO NOTHING');
     for (const p of pacoteIds) ins.run(cargaId, p, ordem++);
   }
 
@@ -502,7 +511,7 @@ class Cargas implements RepositorioCargas {
 }
 
 class Regioes implements RepositorioRegioes {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   private regiao = (r: Linha): Regiao => ({
     id: String(r.id), nome: String(r.nome), criadaEm: String(r.criada_em), criadaPor: String(r.criada_por),
@@ -519,7 +528,7 @@ class Regioes implements RepositorioRegioes {
 
   listar() {
     return this.db
-      .prepare('SELECT * FROM regioes ORDER BY ordem IS NULL, ordem, nome COLLATE NOCASE')
+      .prepare('SELECT * FROM regioes ORDER BY ordem IS NULL, ordem, lower(nome)')
       .all()
       .map(this.regiao);
   }
@@ -528,7 +537,7 @@ class Regioes implements RepositorioRegioes {
     return r ? this.regiao(r) : undefined;
   }
   porNome(nome: string) {
-    const r = this.db.prepare('SELECT * FROM regioes WHERE nome = ? COLLATE NOCASE').get(nome);
+    const r = this.db.prepare('SELECT * FROM regioes WHERE lower(nome) = lower(?)').get(nome);
     return r ? this.regiao(r) : undefined;
   }
   criar(r: Regiao) {
@@ -574,7 +583,7 @@ class Regioes implements RepositorioRegioes {
 }
 
 class Pessoas implements RepositorioPessoas {
-  constructor(private db: DatabaseSync) {}
+  constructor(private db: Db) {}
 
   private linha = (r: Linha): MemoriaPessoa => ({
     chave: String(r.chave), nome: String(r.nome), ruaId: String(r.rua_id), ruaNome: String(r.rua_nome), cep: String(r.cep),
@@ -610,10 +619,10 @@ class Pessoas implements RepositorioPessoas {
   }
 }
 
-export function criarArmazemSqlite(db: DatabaseSync): Armazem {
+export function criarArmazemSqlite(db: Db, dialeto: Dialeto = 'sqlite'): Armazem {
   let profundidade = 0;
   return {
-    pacotes: new Pacotes(db),
+    pacotes: new Pacotes(db, dialeto),
     eventos: new Eventos(db),
     destinos: new Destinos(db),
     lotes: new Lotes(db),
@@ -624,7 +633,14 @@ export function criarArmazemSqlite(db: DatabaseSync): Armazem {
     dias: new Dias(db),
     transacao<T>(fn: () => T): T {
       if (profundidade > 0) return fn(); // já dentro de uma transação
-      db.exec('BEGIN IMMEDIATE');
+      if (dialeto === 'postgres') {
+        // Um escritor por vez no banco inteiro (o que o BEGIN IMMEDIATE do SQLite já garante): o HUB pode ter mais de
+        // uma instância na Vercel, e o "projete e grave" de cada operação não pode se misturar com a de outra.
+        db.exec('BEGIN');
+        db.exec('SELECT pg_advisory_xact_lock(7300001)');
+      } else {
+        db.exec('BEGIN IMMEDIATE');
+      }
       profundidade++;
       try {
         const r = fn();

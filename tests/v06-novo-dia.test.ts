@@ -13,8 +13,7 @@ import { aplicarConhecimentoInicial } from '../src/application/regioes';
 import { pendenciasDaRota, repassarRota } from '../src/application/repasseRota';
 import { cargasDoPerfil, receberEventosStreet } from '../src/application/transporteStreet';
 import { podeFicarProntoParaBaixa } from '../src/domain/confirmacao';
-import { abrirBanco } from '../src/infrastructure/sqlite';
-import { contextoDeTeste, documento, pacote } from './ajuda';
+import { bancoDeTeste, contextoDeTeste, documento, pacote } from './ajuda';
 
 const CATALOGO = JSON.parse(readFileSync('src/infrastructure/conhecimento/conhecimento-inicial.json', 'utf8'));
 
@@ -194,7 +193,7 @@ describe('Novo dia — encerrar', () => {
   });
 
   it('10. o histórico de dias é append-only (o banco recusa alterar ou apagar)', () => {
-    const db = abrirBanco(':memory:');
+    const db = bancoDeTeste();
     db.prepare("INSERT INTO dias (id, data_ref, encerrado_em, encerrado_por, historico, resumo, chave_idempotencia) VALUES ('d','2026-09-23','2026-09-23T13:00:00Z','G',1,'{}','k')").run();
     expect(() => db.prepare('UPDATE dias SET historico = 0').run()).toThrow(/append-only/);
     expect(() => db.prepare('DELETE FROM dias').run()).toThrow(/append-only/);

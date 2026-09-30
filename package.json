@@ -8,18 +8,23 @@
     "build": "vite build",
     "start": "set NODE_ENV=production&& tsx src/server/main.ts",
     "test": "vitest run",
+    "test:pg": "set TESTE_BANCO=pg&& vitest run --no-file-parallelism",
     "lint": "tsc --noEmit",
     "check:destino": "tsx scripts/check-destino.ts"
   },
   "dependencies": {
     "express": "^5.2.1",
+    "pg": "^8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",

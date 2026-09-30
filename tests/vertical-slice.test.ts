@@ -249,7 +249,7 @@ describe('histórico', () => {
     const ctx = contextoDeTeste();
     importarEConfirmar(ctx, documento([pacote({ tracking_code: 'A' })]));
     // acesso direto ao banco, simulando um erro de programação
-    const db = (ctx.armazem.eventos as unknown as { db: import('node:sqlite').DatabaseSync }).db;
+    const db = (ctx.armazem.eventos as unknown as { db: import('../src/infrastructure/banco').Db }).db;
     expect(() => db.exec("UPDATE eventos SET ator = 'outro'")).toThrow(/append-only/);
     expect(() => db.exec('DELETE FROM eventos')).toThrow(/append-only/);
   });
