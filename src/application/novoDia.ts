@@ -6,6 +6,9 @@
  *   - amanhã → o pacote volta para a CAIXA como RETORNADO, explícito que é do dia anterior (sem ajudante);
  *   - galpão → DEVOLVIDO: sai da operação (se o código chegar de novo num lote, o HUB reabre).
  * Entregues continuam entregues. Carga montada que nem saiu é desfeita (os pacotes voltam à caixa).
+ * Os pacotes que estavam nas caixas SEM ajudante (ninguém pegou, ou Retornados de antes) também entram no
+ * fechamento, com uma escolha só: "fica para amanhã" (continuam nas caixas como estão) ou "galpão"
+ * (DEVOLVIDO: a mesa fica vazia e as caixas só reaparecem quando o próximo JSON chegar).
  *
  * "Só memória" (historico=false) marca o dia como TESTE: a memória (caixas, pessoas, destinos) nunca é
  * apagada por nenhuma das opções; o que muda é se o dia conta no histórico de entregas. Nada é apagado
@@ -63,10 +66,22 @@ function cargasAbertas(ctx: Contexto): CargaAberta[] {
     });
 }
 
+/** Pacotes que estão nas caixas sem ajudante agora, mais os de cargas montadas que serão desfeitas. */
+function idsSemResponsavel(ctx: Contexto, montadas: CargaAberta[]): string[] {
+  const nasCaixas = ctx.armazem.pacotes
+    .listar()
+    .filter((p) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'RETORNADO'))
+    .map((p) => p.id);
+  const dasMontadas = montadas.filter((a) => a.resumo.situacao === 'MONTADA').flatMap((a) => a.pacotes.map((p) => p.id));
+  return [...new Set([...nasCaixas, ...dasMontadas])];
+}
+
 export interface PreviaNovoDia {
   /** O dia que vai ser encerrado (AAAA-MM-DD, São Paulo). */
   dataRef: string;
   cargas: ResumoCargaDoDia[];
+  /** Pacotes nas caixas sem ajudante (incluindo os de carga montada que serão desfeitos): pedem uma escolha. */
+  semResponsavel: number;
   totais: { cargasEmRota: number; montadas: number; entregues: number; sobras: number; pacotesMontados: number };
 }
 
@@ -77,6 +92,7 @@ export function previaNovoDia(ctx: Contexto): PreviaNovoDia {
   return {
     dataRef: dataSP(ctx.relogio.agora()),
     cargas,
+    semResponsavel: idsSemResponsavel(ctx, abertas).length,
     totais: {
       cargasEmRota: cargas.filter((c) => c.situacao === 'EM_ROTA').length,
       montadas: cargas.filter((c) => c.situacao === 'MONTADA').length,
@@ -95,6 +111,8 @@ export interface EntradaEncerrarDia {
   historico: boolean;
   /** O que fazer com as sobras de cada ajudante (chave = id do ajudante). */
   destinos: Record<string, DestinoDasSobras>;
+  /** O que fazer com os pacotes das caixas sem ajudante (obrigatório quando houver algum). */
+  destinoSemResponsavel?: DestinoDasSobras;
 }
 
 export function encerrarDia(ctx: Contexto, entrada: EntradaEncerrarDia): { dia: Dia; jaEncerrado: boolean } {
@@ -105,9 +123,19 @@ export function encerrarDia(ctx: Contexto, entrada: EntradaEncerrarDia): { dia: 
     if (repetido) return { dia: repetido, jaEncerrado: true };
 
     const abertas = cargasAbertas(ctx);
-    if (abertas.length === 0) throw new ErroAplicacao('NADA_A_ENCERRAR', 'não há cargas abertas para encerrar', 409);
-    for (const d of Object.values(entrada.destinos)) {
+    const semDonoIds = idsSemResponsavel(ctx, abertas);
+    if (abertas.length === 0 && semDonoIds.length === 0) {
+      throw new ErroAplicacao('NADA_A_ENCERRAR', 'não há cargas abertas nem pacotes nas caixas para encerrar', 409);
+    }
+    for (const d of [...Object.values(entrada.destinos), ...(entrada.destinoSemResponsavel ? [entrada.destinoSemResponsavel] : [])]) {
       if (d !== 'amanha' && d !== 'galpao') throw new ErroAplicacao('DESTINO_INVALIDO', `destino "${String(d)}" não existe (use amanha ou galpao)`);
+    }
+    if (semDonoIds.length > 0 && !entrada.destinoSemResponsavel) {
+      throw new ErroAplicacao(
+        'FALTA_DESTINO',
+        `escolha o que fazer com os ${semDonoIds.length} pacote(s) que estão nas caixas sem ajudante: ficam para amanhã ou voltam ao galpão`,
+        409,
+      );
     }
     const faltando = abertas.filter((a) => a.resumo.situacao === 'EM_ROTA' && a.resumo.sobras > 0 && !entrada.destinos[a.carga.ajudante.id]);
     if (faltando.length > 0) {
@@ -174,7 +202,23 @@ export function encerrarDia(ctx: Contexto, entrada: EntradaEncerrarDia): { dia: 
       cargasResumo.push({ ...resumo, destino });
     }
 
-    const resumo: ResumoDia = { cargas: cargasResumo, totais };
+    // Quem ninguém pegou: "galpão" tira da mesa (DEVOLVIDO); "amanhã" deixa nas caixas como estão.
+    if (entrada.destinoSemResponsavel === 'galpao') {
+      for (const id of semDonoIds) {
+        const p = armazem.pacotes.porId(id)!;
+        erroDominio(() => registrarEvento(armazem, {
+          ...base, id: ctx.ids.novo(), pacoteId: id, tipo: 'DEVOLVIDO_NO_NOVO_DIA',
+          dados: { dia: { id: diaId, data: dataRef }, historico: entrada.historico },
+          chaveIdempotencia: `dia:${diaId}:sem-dono:${id}`,
+        }), p.codigo);
+      }
+    }
+
+    const resumo: ResumoDia = {
+      cargas: cargasResumo,
+      totais,
+      ...(semDonoIds.length > 0 ? { semResponsavel: { pacotes: semDonoIds.length, destino: entrada.destinoSemResponsavel! } } : {}),
+    };
     const dia: Dia = { id: diaId, dataRef, encerradoEm: agora, encerradoPor: entrada.ator, historico: entrada.historico, resumo, chave: entrada.chave };
     armazem.dias.criar(dia);
     return { dia, jaEncerrado: false };

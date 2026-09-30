@@ -30,7 +30,7 @@ export type EstadoPacote = (typeof ESTADOS)[number];
 
 /** Transições permitidas. Tudo o que não está aqui é recusado pelo domínio. */
 export const TRANSICOES: Record<EstadoPacote, readonly EstadoPacote[]> = {
-  NAO_ATRIBUIDO: ['ATRIBUIDO'],
+  NAO_ATRIBUIDO: ['ATRIBUIDO', 'DEVOLVIDO'], // NAO_ATRIBUIDO→DEVOLVIDO: Novo dia, pacote que ninguém pegou
   ATRIBUIDO: ['ATRIBUIDO', 'NAO_ATRIBUIDO', 'EM_ROTA'], // ATRIBUIDO→ATRIBUIDO = reatribuição
   // Fim do dia: o que não foi entregue volta para a caixa (RETORNADO) ou sai para o galpão (DEVOLVIDO).
   EM_ROTA: ['ENTREGUE', 'INSUCESSO', 'RETORNADO', 'DEVOLVIDO'],

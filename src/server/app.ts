@@ -79,6 +79,7 @@ const Esquemas = {
     chave: z.string().min(1),
     historico: z.boolean(),
     destinos: z.record(z.string(), z.enum(['amanha', 'galpao'])),
+    destinoSemResponsavel: z.enum(['amanha', 'galpao']).optional(),
   }),
   repassarRota: z.object({
     paraAjudanteId: z.string().min(1),

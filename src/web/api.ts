@@ -51,8 +51,8 @@ export const api = {
       aguardandoRevisao: { pacotes: number; ruas: number };
     }>('/orquestrador'),
   previaNovoDia: () => chamar<PreviaNovoDia>('/novo-dia/previa'),
-  encerrarDia: (destinos: Record<string, 'amanha' | 'galpao'>, historico: boolean, ator: string, chave: string) =>
-    chamar<{ dia: Dia; jaEncerrado: boolean }>('/novo-dia', { body: { destinos, historico, ator, chave } }),
+  encerrarDia: (destinos: Record<string, 'amanha' | 'galpao'>, historico: boolean, ator: string, chave: string, destinoSemResponsavel?: 'amanha' | 'galpao') =>
+    chamar<{ dia: Dia; jaEncerrado: boolean }>('/novo-dia', { body: { destinos, historico, ator, chave, destinoSemResponsavel } }),
   dias: () => chamar<Dia[]>('/dias'),
   pendenciasDaRota: (cargaId: string) => chamar<PendenciasDaRota>(`/cargas/${cargaId}/pendencias-da-rota`),
   repassarRota: (cargaId: string, paraAjudanteId: string, caixas: string[] | undefined, motivo: string, ator: string) =>

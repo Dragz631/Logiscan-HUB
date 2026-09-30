@@ -148,7 +148,7 @@ describe('Novo dia — encerrar', () => {
     confirmarImportacao(ctx, importar(ctx, [sampaio('SP1', 'Lia', '3', 0), sampaio('SP2', 'Davi', '5', 1)]), 'Galpão');
     const cJoao = atribuirRuas(ctx, { ajudanteId: joao.id, ruas: [`regiao:${caixa('2').id}`], ator: 'G', chave: 'j' }).carga;
     expect(previaNovoDia(ctx).totais).toMatchObject({ montadas: 1, pacotesMontados: 2 });
-    const r = encerrarDia(ctx, { ator: 'G', chave: 'd1', historico: true, destinos: { [hugo.id]: 'amanha', [ana.id]: 'amanha' } });
+    const r = encerrarDia(ctx, { ator: 'G', chave: 'd1', historico: true, destinos: { [hugo.id]: 'amanha', [ana.id]: 'amanha' }, destinoSemResponsavel: 'amanha' });
     expect(p('SP1')).toMatchObject({ estado: 'NAO_ATRIBUIDO', responsavelId: null, cargaId: null });
     expect(r.dia.resumo.totais.desfeitas).toBe(2);
     expect(ctx.armazem.cargas.porId(cJoao.id)?.finalizadaEm).not.toBeNull();
@@ -332,5 +332,60 @@ describe('Street → HUB: o texto da entrega', () => {
     expect(insucesso.tipo === 'INSUCESSO_REGISTRADO' && insucesso.dados.texto).toBe('⚠️ Insucesso\nMorador ausente');
     expect(p('S1').confirmacaoEntrega?.status).toBe('INCOMPLETA');
     expect(podeFicarProntoParaBaixa(p('S1'))).toBe(false);
+  });
+});
+
+describe('Novo dia — pacotes nas caixas sem ajudante', () => {
+  /** Meio do dia + 2 pacotes da caixa 2 (Gen. Sampaio) que ninguém pegou. */
+  function comSobraNaMesa() {
+    const m = meioDoDia();
+    confirmarImportacao(m.ctx, importar(m.ctx, [sampaio('X1', 'Lia', '3', 7), sampaio('X2', 'Noé', '4', 8)]), 'Galpão');
+    return m;
+  }
+  const todosAmanha = (m: ReturnType<typeof meioDoDia>) => ({ [m.hugo.id]: 'amanha' as const, [m.ana.id]: 'amanha' as const });
+
+  it('22. a prévia conta os pacotes que estão nas caixas sem ajudante', () => {
+    const { ctx } = comSobraNaMesa();
+    expect(previaNovoDia(ctx).semResponsavel).toBe(2);
+  });
+
+  it('23. sem escolher o destino deles, NADA é gravado (FALTA_DESTINO)', () => {
+    const m = comSobraNaMesa();
+    const e = erro(() => encerrarDia(m.ctx, { ator: 'G', chave: 'k', historico: false, destinos: todosAmanha(m) }));
+    expect(e.codigo).toBe('FALTA_DESTINO');
+    expect(e.message).toMatch(/sem ajudante/);
+    expect(listarDias(m.ctx)).toHaveLength(0);
+    expect(m.p('S3').estado).toBe('EM_ROTA');
+  });
+
+  it('24. "galpão": a mesa fica vazia (DEVOLVIDO) e o código que voltar num lote reabre', () => {
+    const m = comSobraNaMesa();
+    const r = encerrarDia(m.ctx, { ator: 'G', chave: 'k', historico: false, destinos: todosAmanha(m), destinoSemResponsavel: 'galpao' });
+    expect(r.dia.resumo.semResponsavel).toEqual({ pacotes: 2, destino: 'galpao' });
+    expect(m.p('X1').estado).toBe('DEVOLVIDO');
+    expect(m.p('X2').estado).toBe('DEVOLVIDO');
+    expect(m.p('S3').estado).toBe('RETORNADO'); // quem estava em rota e ficou "para amanhã" continua
+    expect(detalharPacote(m.ctx, m.p('X1').id).timeline.map((t) => t.descricao).join('|')).toMatch(/ninguém pegou — devolvido ao galpão/);
+    expect(previaNovoDia(m.ctx).semResponsavel).toBe(m.ctx.armazem.pacotes.listar().filter((p) => p.estado === 'RETORNADO').length);
+  });
+
+  it('25. "amanhã": ficam nas caixas como estão; só eles (sem carga nenhuma) também podem ser encerrados', () => {
+    const ctx = contextoDeTeste();
+    aplicarConhecimentoInicial(ctx, CATALOGO);
+    confirmarImportacao(ctx, importar(ctx, [sampaio('Y1', 'Lia', '3', 0), gurjao('Y2', 'Rita', '7', 1)]), 'Galpão');
+    expect(previaNovoDia(ctx)).toMatchObject({ cargas: [], semResponsavel: 2 });
+    const r = encerrarDia(ctx, { ator: 'G', chave: 'k', historico: true, destinos: {}, destinoSemResponsavel: 'amanha' });
+    expect(r.dia.resumo.semResponsavel).toEqual({ pacotes: 2, destino: 'amanha' });
+    expect(ctx.armazem.pacotes.porChave('jtexpress', 'Y1')!.estado).toBe('NAO_ATRIBUIDO');
+  });
+
+  it('26. "galpão" sem nenhuma carga aberta tira tudo da mesa; o banco continua íntegro (reprojeção igual)', () => {
+    const ctx = contextoDeTeste();
+    aplicarConhecimentoInicial(ctx, CATALOGO);
+    confirmarImportacao(ctx, importar(ctx, [sampaio('Y1', 'Lia', '3', 0), gurjao('Y2', 'Rita', '7', 1)]), 'Galpão');
+    encerrarDia(ctx, { ator: 'G', chave: 'k', historico: true, destinos: {}, destinoSemResponsavel: 'galpao' });
+    expect(ctx.armazem.pacotes.listar().map((p) => p.estado)).toEqual(['DEVOLVIDO', 'DEVOLVIDO']);
+    expect(previaNovoDia(ctx).semResponsavel).toBe(0);
+    expect(erro(() => encerrarDia(ctx, { ator: 'G', chave: 'k2', historico: true, destinos: {} })).codigo).toBe('NADA_A_ENCERRAR');
   });
 });

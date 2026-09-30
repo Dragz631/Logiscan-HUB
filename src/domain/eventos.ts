@@ -147,6 +147,15 @@ export type EventoDiaEncerrado = Base<'DIA_ENCERRADO', {
   retornadoDe: RetornadoDe;
 }>;
 
+/**
+ * FIM DO DIA, pacote que NINGUÉM pegou (estava na caixa sem ajudante): o operador escolheu devolver ao galpão.
+ * Sai da operação, como o DEVOLVIDO de quem estava em rota. Se escolheu "amanhã", nada muda no pacote.
+ */
+export type EventoDevolvidoNoNovoDia = Base<'DEVOLVIDO_NO_NOVO_DIA', {
+  dia: { id: string; data: string };
+  historico: boolean;
+}>;
+
 /** O mesmo código de um pacote DEVOLVIDO chegou de novo num lote: volta ao galpão, disponível para a triagem. */
 export type EventoReabertoDoGalpao = Base<'REABERTO_DO_GALPAO', { loteId: string; arquivo: string }>;
 
@@ -175,6 +184,7 @@ export type Evento =
   | EventoCorrecaoRegistrada
   | EventoCaixaDefinida
   | EventoDiaEncerrado
+  | EventoDevolvidoNoNovoDia
   | EventoReabertoDoGalpao
   | EventoRepassadoEmRota;
 
@@ -361,6 +371,11 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
         retornadoDe: alvo === 'RETORNADO' ? e.dados.retornadoDe : null,
       };
     }
+    case 'DEVOLVIDO_NO_NOVO_DIA':
+      if (atual.cargaId !== null || (atual.estado !== 'NAO_ATRIBUIDO' && atual.estado !== 'RETORNADO')) {
+        throw new ErroDominio('TRANSICAO_INVALIDA', `só devolve ao galpão, no novo dia, o pacote que está na caixa sem ajudante (está ${atual.estado})`);
+      }
+      return { ...base, estado: 'DEVOLVIDO', responsavelId: null, cargaId: null, retornadoDe: null };
     case 'REABERTO_DO_GALPAO':
       if (atual.estado !== 'DEVOLVIDO') {
         throw new ErroDominio('NAO_DEVOLVIDO', `só reabre um pacote devolvido ao galpão (está ${atual.estado})`);
@@ -423,6 +438,8 @@ export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string)
         ? `Novo dia (${diaCurto(d.dia.data)}): não entregue — voltou para a caixa como Retornado do dia ${diaCurto(d.retornadoDe.dia)} (carga ${d.carga.codigo}, com ${d.ajudante.nome})`
         : `Novo dia (${diaCurto(d.dia.data)}): não entregue — devolvido ao galpão (carga ${d.carga.codigo}, com ${d.ajudante.nome})`;
     }
+    case 'DEVOLVIDO_NO_NOVO_DIA':
+      return `Novo dia (${diaCurto(e.dados.dia.data)}): ninguém pegou — devolvido ao galpão`;
     case 'REABERTO_DO_GALPAO':
       return `Reaberto no galpão: o mesmo código chegou de novo (${e.dados.arquivo})`;
     case 'REPASSADO_EM_ROTA':

@@ -26,6 +26,8 @@ export interface ResumoCargaDoDia {
 
 export interface ResumoDia {
   cargas: ResumoCargaDoDia[];
+  /** Pacotes que estavam nas caixas SEM ajudante quando o dia foi encerrado, e o que se fez com eles. */
+  semResponsavel?: { pacotes: number; destino: DestinoDasSobras };
   totais: { cargas: number; entregues: number; amanha: number; galpao: number; desfeitas: number };
 }
 

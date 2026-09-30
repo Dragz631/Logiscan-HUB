@@ -154,8 +154,10 @@ export function Triagem() {
     }
   }
 
-  const topo = caixas.filter((c) => !c.paiId);
-  const filhas = (id: string) => caixas.filter((c) => c.paiId === id);
+  // A mesa só mostra as caixas que têm pacote hoje: as outras só aparecem quando um JSON trouxer pacotes para elas.
+  // (A lista completa continua valendo para escolher a caixa de um pacote.)
+  const filhas = (id: string) => caixas.filter((c) => c.paiId === id && c.total > 0);
+  const topo = caixas.filter((c) => !c.paiId && c.total + caixas.filter((s) => s.paiId === c.id).reduce((n, s) => n + s.total, 0) > 0);
 
   return (
     <section className="repasse">
@@ -196,6 +198,7 @@ export function Triagem() {
             <span className="selo-contagem">{v?.nasCaixas ?? 0} pacote(s)</span>
           </div>
           <div className="lista-cards">
+            {topo.length === 0 && <p className="fraco centro">Nenhuma caixa com pacote. As caixas aparecem aqui quando você importar um JSON.</p>}
             {topo.map((c) => {
               const subs = filhas(c.id);
               const total = c.total + subs.reduce((n, s) => n + s.total, 0);
