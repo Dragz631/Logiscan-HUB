@@ -43,7 +43,7 @@ export function criarPerfil(ctx: Contexto, d: DadosPerfil): Ajudante {
     if (armazem.ajudantes.listar().some((a) => a.nome.toLowerCase() === v.nome.toLowerCase())) {
       throw new ErroAplicacao('AJUDANTE_DUPLICADO', `já existe um ajudante chamado ${v.nome}`, 409);
     }
-    const a: Ajudante = { id: ctx.ids.novo(), ativo: d.ativo ?? true, criadoEm: ctx.relogio.agora(), ...v };
+    const a: Ajudante = { id: ctx.ids.novo(), ativo: d.ativo ?? true, criadoEm: ctx.relogio.agora(), streetVistoEm: null, ...v };
     armazem.ajudantes.criar(a);
     return a;
   });
@@ -129,6 +129,9 @@ export interface UnidadeRepasse {
   disponiveis: number;
   atribuidos: number;
   revisao: number;
+  /** Pacotes que voltaram para a caixa ao fim do dia (Retornado) e de quais dias (AAAA-MM-DD). */
+  retornados: number;
+  diasRetornados: string[];
   responsaveis: string[];
   /** Ruas de verdade dentro da caixa (ao expandir). */
   ruas: RuaNoOrquestrador[];
@@ -153,6 +156,7 @@ export function listarUnidades(ctx: Contexto): UnidadeRepasse[] {
     return {
       chave: `regiao:${c.id}`, tipo: 'caixa', numero: c.numero, nome: c.nome, regiao,
       total: r.total, disponiveis: r.disponiveis, atribuidos: r.atribuidos, revisao: r.revisao, responsaveis: r.responsaveis,
+      retornados: r.retornados, diasRetornados: r.diasRetornados,
       ruas: agruparPorRua(lista, (p) => unidadeDe(p).rua).map((x) => ({ ...x, regiao })),
       subcaixas: [],
     };
@@ -170,7 +174,7 @@ export function listarUnidades(ctx: Contexto): UnidadeRepasse[] {
     if (!grupos.has(pai.id)) {
       grupos.set(pai.id, {
         chave: `regiao:${pai.id}`, tipo: 'grupo', numero: pai.numero, nome: pai.nome, regiao: { status: 'conhecida', id: pai.id, nome: pai.nome },
-        total: 0, disponiveis: 0, atribuidos: 0, revisao: 0, responsaveis: [], ruas: [], subcaixas: [],
+        total: 0, disponiveis: 0, atribuidos: 0, revisao: 0, retornados: 0, diasRetornados: [], responsaveis: [], ruas: [], subcaixas: [],
       });
     }
     const g = grupos.get(pai.id)!;
@@ -179,6 +183,8 @@ export function listarUnidades(ctx: Contexto): UnidadeRepasse[] {
     g.disponiveis += u.disponiveis;
     g.atribuidos += u.atribuidos;
     g.revisao += u.revisao;
+    g.retornados += u.retornados;
+    g.diasRetornados = [...new Set([...g.diasRetornados, ...u.diasRetornados])].sort();
     g.responsaveis = [...new Set([...g.responsaveis, ...u.responsaveis])];
   }
   const dados = (u: UnidadeRepasse) => regioes.get(u.chave.slice('regiao:'.length))!;
@@ -206,6 +212,10 @@ export interface ResumoPerfil {
   rotaIniciadaEm: string | null;
   /** Quando o Street do perfil confirmou que carregou a carga (null = ainda não chegou). */
   recebidaNoStreetEm: string | null;
+  /** Último contato do Street deste perfil com o HUB (null = nunca conectou). */
+  streetVistoEm: string | null;
+  /** Último repasse na hora que envolveu a carga atual (avisa nos cards). */
+  repasse: { sentido: 'enviado' | 'recebido'; com: string; em: string; pacotes: number } | null;
 }
 
 function resumoPerfil(ctx: Contexto, a: Ajudante, unidadeDe = resolvedorDeUnidade(ctx)): ResumoPerfil {
@@ -214,6 +224,14 @@ function resumoPerfil(ctx: Contexto, a: Ajudante, unidadeDe = resolvedorDeUnidad
   const entregues = pacotes.filter((p) => p.estado === 'ENTREGUE').length;
   const insucessos = pacotes.filter((p) => p.estado === 'INSUCESSO').length;
   const situacao = !carga ? null : !carga.rotaIniciadaEm ? 'MONTADA' : entregues + insucessos === pacotes.length && pacotes.length > 0 ? 'CONCLUIDA' : 'EM_ROTA';
+  const eventosCarga = carga ? ctx.armazem.cargas.eventos(carga.id) : [];
+  let repasse: ResumoPerfil['repasse'] = null;
+  for (const ev of eventosCarga) {
+    if (ev.tipo === 'ROTA_REPASSADA') repasse = { sentido: 'enviado', com: ev.dados.para.nome, em: ev.ocorridoEm, pacotes: ev.dados.pacotes };
+    if (ev.tipo === 'CARGA_CRIADA' && ev.dados.repassadaDe) {
+      repasse = { sentido: 'recebido', com: ev.dados.repassadaDe.ajudante.nome, em: ev.ocorridoEm, pacotes: ev.dados.quantidade };
+    }
+  }
   return {
     ajudante: a,
     carga: carga && situacao ? { id: carga.id, codigo: carga.codigo, situacao } : null,
@@ -225,7 +243,9 @@ function resumoPerfil(ctx: Contexto, a: Ajudante, unidadeDe = resolvedorDeUnidad
     pendentes: pacotes.length - entregues - insucessos,
     progresso: pacotes.length ? Math.round(((entregues + insucessos) / pacotes.length) * 100) : 0,
     rotaIniciadaEm: carga?.rotaIniciadaEm ?? null,
-    recebidaNoStreetEm: carga ? (ctx.armazem.cargas.eventos(carga.id).filter((e) => e.tipo === 'RECEBIDA_NO_STREET').at(-1)?.ocorridoEm ?? null) : null,
+    recebidaNoStreetEm: eventosCarga.filter((e) => e.tipo === 'RECEBIDA_NO_STREET').at(-1)?.ocorridoEm ?? null,
+    streetVistoEm: a.streetVistoEm,
+    repasse,
   };
 }
 
@@ -345,7 +365,8 @@ export function detalharPerfil(ctx: Contexto, ajudanteId: string): DetalhePerfil
 /** Chave vinda da tela: caixa (`regiao:<id>`) passa intacta; nome de rua vira a chave da rua. */
 const chaveEntrada = (k: string) => (k.startsWith('regiao:') || k.startsWith('sem:') ? k : chaveRua(k));
 
-const livre = (p: Pacote) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO');
+/** Disponível para o repasse: sem carga e sem ajudante definitivo. RETORNADO (voltou ao fim do dia) também. */
+const livre = (p: Pacote) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO' || p.estado === 'RETORNADO');
 
 /** Caixa que ficou fora de uma seleção de GRUPO inteiro (Associações), e por quê (sempre dito na tela). */
 export interface RuaDeFora {
@@ -408,7 +429,7 @@ function expandirPedido(
   return { caixas, deFora };
 }
 
-function erroDominio<T>(fn: () => T, codigo?: string): T {
+export function erroDominio<T>(fn: () => T, codigo?: string): T {
   try {
     return fn();
   } catch (e) {
@@ -497,7 +518,7 @@ export function atribuirRuas(
     const base = { ator: entrada.ator, origem: 'hub' as const, ocorridoEm: agora, registradoEm: agora };
 
     for (const { p, caixa } of entram) {
-      if (p.estado === 'NAO_ATRIBUIDO') {
+      if (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'RETORNADO') {
         erroDominio(() => registrarEvento(armazem, {
           ...base, id: ctx.ids.novo(), pacoteId: p.id, tipo: 'ATRIBUIDO', dados: { ajudante: ref },
           chaveIdempotencia: `rua:${entrada.chave}:atribuido:${p.id}`,

@@ -47,11 +47,27 @@ interface BaseEventoCarga<T extends string, D> {
 }
 
 export type EventoCarga =
-  | BaseEventoCarga<'CARGA_CRIADA', { ajudante: AjudanteRef; quantidade: number }>
+  | BaseEventoCarga<'CARGA_CRIADA', {
+      ajudante: AjudanteRef;
+      quantidade: number;
+      /** Carga nascida de um REPASSE NA HORA: de qual rota veio. */
+      repassadaDe?: { carga: { id: string; codigo: string }; ajudante: AjudanteRef; motivo: string };
+    }>
   | BaseEventoCarga<'RUAS_ADICIONADAS', { ruas: RuaRef[]; chave?: string }>
   | BaseEventoCarga<'RUA_REMOVIDA', { rua: RuaRef; motivo: 'removida' | 'reatribuida'; para?: AjudanteRef }>
-  | BaseEventoCarga<'ROTA_INICIADA', { quantidade: number }>
-  | BaseEventoCarga<'ROTA_FINALIZADA', { entregues: number; insucessos: number }>
+  | BaseEventoCarga<'ROTA_INICIADA', { quantidade: number; repasse?: boolean }>
+  | BaseEventoCarga<'ROTA_FINALIZADA', { entregues: number; insucessos: number; pendentes?: number; diaId?: string }>
+  /** Novo dia: carga montada que nem saiu foi desfeita; os pacotes voltaram para a caixa. */
+  | BaseEventoCarga<'CARGA_DESFEITA', { quantidade: number; diaId: string }>
+  /** Repasse na hora: parte da rota passou para outro ajudante (carga nova). */
+  | BaseEventoCarga<'ROTA_REPASSADA', {
+      para: AjudanteRef;
+      paraCarga: { id: string; codigo: string };
+      pacotes: number;
+      caixas: RuaRef[];
+      motivo: string;
+      chave: string;
+    }>
   | BaseEventoCarga<'RECEBIDA_NO_STREET', { ajudante: AjudanteRef; quantidade: number }>
   | BaseEventoCarga<'CARGA_EXPORTADA', { arquivo: string }>
   | BaseEventoCarga<'RETORNO_RECEBIDO', {
@@ -63,7 +79,7 @@ export type EventoCarga =
 
 export type SituacaoCarga = 'MONTADA' | 'EM_ROTA' | 'CONCLUIDA' | 'FINALIZADA';
 
-const DESFECHO: EstadoPacote[] = ['ENTREGUE', 'INSUCESSO', 'RETORNADO', 'PRONTO_PARA_BAIXA', 'BAIXADO'];
+const DESFECHO: EstadoPacote[] = ['ENTREGUE', 'INSUCESSO', 'RETORNADO', 'DEVOLVIDO', 'PRONTO_PARA_BAIXA', 'BAIXADO'];
 
 export const ESTADOS_DESFECHO = DESFECHO;
 
@@ -78,9 +94,14 @@ export function codigoCarga(agoraIso: string, nomeAjudante: string, sequenciaNoD
   return `${prefixoCarga(agoraIso, nomeAjudante)}${sequenciaNoDia}`;
 }
 
+/** Dia (AAAA-MM-DD) no fuso de São Paulo: é o "dia" da operação. */
+export function dataSP(iso: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(iso));
+}
+
 /** "C-20260924-HUGO-" (sem a sequência). */
 export function prefixoCarga(agoraIso: string, nomeAjudante: string): string {
-  const dia = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(agoraIso)).replace(/-/g, '');
+  const dia = dataSP(agoraIso).replace(/-/g, '');
   const nome =
     nomeAjudante
       .normalize('NFD')
@@ -94,7 +115,9 @@ export function prefixoCarga(agoraIso: string, nomeAjudante: string): string {
 export function descreverEventoCarga(e: EventoCarga): string {
   switch (e.tipo) {
     case 'CARGA_CRIADA':
-      return `Carga montada para ${e.dados.ajudante.nome} com ${e.dados.quantidade} pacote(s)`;
+      return e.dados.repassadaDe
+        ? `Repasse do ${e.dados.repassadaDe.ajudante.nome} para ${e.dados.ajudante.nome}: carga nova com ${e.dados.quantidade} pacote(s) da rota ${e.dados.repassadaDe.carga.codigo}${e.dados.repassadaDe.motivo ? ` — ${e.dados.repassadaDe.motivo}` : ''}`
+        : `Carga montada para ${e.dados.ajudante.nome} com ${e.dados.quantidade} pacote(s)`;
     case 'RUAS_ADICIONADAS':
       return `Rua(s) atribuída(s): ${e.dados.ruas.map((r) => `${r.nome} (${r.quantidade})`).join(', ')}`;
     case 'RUA_REMOVIDA':
@@ -102,11 +125,19 @@ export function descreverEventoCarga(e: EventoCarga): string {
         ? `${e.dados.rua.nome} (${e.dados.rua.quantidade}) reatribuída para ${e.dados.para?.nome}`
         : `${e.dados.rua.nome} (${e.dados.rua.quantidade}) removida da carga — pacotes voltaram ao galpão`;
     case 'ROTA_FINALIZADA':
-      return `Rota finalizada: ${e.dados.entregues} entregue(s), ${e.dados.insucessos} insucesso(s)`;
+      return e.dados.diaId
+        ? `Novo dia: rota encerrada com ${e.dados.entregues} entregue(s)${e.dados.pendentes ? `, ${e.dados.pendentes} não entregue(s) (voltaram à caixa ou ao galpão)` : ''}`
+        : `Rota finalizada: ${e.dados.entregues} entregue(s), ${e.dados.insucessos} insucesso(s)`;
+    case 'CARGA_DESFEITA':
+      return `Novo dia: carga montada desfeita — ${e.dados.quantidade} pacote(s) voltaram para as caixas`;
+    case 'ROTA_REPASSADA':
+      return `Repasse de rota: ${e.dados.pacotes} pacote(s) em ${e.dados.caixas.length} caixa(s) passaram para ${e.dados.para.nome} (carga ${e.dados.paraCarga.codigo})${e.dados.motivo ? ` — ${e.dados.motivo}` : ''}`;
     case 'RECEBIDA_NO_STREET':
       return `Carga recebida no Street pelo perfil de ${e.dados.ajudante.nome} (${e.dados.quantidade} pacote(s))`;
     case 'ROTA_INICIADA':
-      return `Rota iniciada: ${e.dados.quantidade} pacote(s) saíram para a rua`;
+      return e.dados.repasse
+        ? `Rota assumida por repasse: ${e.dados.quantidade} pacote(s) já estão na rua`
+        : `Rota iniciada: ${e.dados.quantidade} pacote(s) saíram para a rua`;
     case 'CARGA_EXPORTADA':
       return `Arquivo da carga gerado para o Street (${e.dados.arquivo})`;
     case 'RETORNO_RECEBIDO': {

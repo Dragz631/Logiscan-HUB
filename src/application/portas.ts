@@ -6,6 +6,7 @@ import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
 import type { EventoPessoa, MemoriaPessoa } from '../domain/caixas';
+import type { Dia } from '../domain/dias';
 import type { Evento } from '../domain/eventos';
 import type { DecisaoConflito, ItemPrevia } from '../domain/importacao';
 import type { EstadoPacote, Pacote } from '../domain/pacote';
@@ -18,6 +19,8 @@ export interface Ajudante {
   criadoEm: string;
   /** Ex.: "Moto", "Bicicleta", "A pé". Livre, informativo. */
   veiculo: string | null;
+  /** Último contato do Street deste perfil com o HUB. null = nunca conectou. */
+  streetVistoEm: string | null;
 }
 
 export type StatusLote = 'PREVIA' | 'CONFIRMADO' | 'DESCARTADO';
@@ -90,6 +93,15 @@ export interface RepositorioAjudantes {
   listar(): Ajudante[];
   criar(a: Ajudante): void;
   atualizar(a: Ajudante): void;
+  marcarStreetVisto(id: string, em: string): void;
+}
+
+/** Dias encerrados (histórico, append-only). */
+export interface RepositorioDias {
+  criar(d: Dia): void;
+  listar(): Dia[];
+  porId(id: string): Dia | undefined;
+  porChave(chave: string): Dia | undefined;
 }
 
 export interface RepositorioCargas {
@@ -144,6 +156,7 @@ export interface Armazem {
   cargas: RepositorioCargas;
   regioes: RepositorioRegioes;
   pessoas: RepositorioPessoas;
+  dias: RepositorioDias;
   transacao<T>(fn: () => T): T;
 }
 

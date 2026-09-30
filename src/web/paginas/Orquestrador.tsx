@@ -10,7 +10,8 @@ import { useMemo, useState } from 'react';
 import type { ResumoPerfil, UnidadeRepasse } from '../../application/orquestracao';
 import { api } from '../api';
 import { useOperador } from '../contexto';
-import { dataHora } from '../formato';
+import { dataHora, diaCurto, streetVisto } from '../formato';
+import { RepassarRota } from './RepassarRota';
 import { Aviso, useCarregar } from './comum';
 
 export const ROTULO_ESTADO_RUA = { DISPONIVEL: 'Disponível', ATRIBUIDA: 'Atribuída', EM_ROTA: 'Em rota', CONCLUIDA: 'Concluída' } as const;
@@ -64,6 +65,11 @@ function CardUnidade({ u, marcadas, nomes, onAlternar, dentroDeMarcado = false }
             {resumoUnidade(u)}
             {u.atribuidos > 0 && <> · {u.disponiveis > 0 ? `${u.atribuidos} já com` : 'com'} <b>{com}</b></>}
             {u.revisao > 0 && <span className="alerta-txt"> · {u.revisao} em revisão</span>}
+            {u.retornados > 0 && (
+              <span className="chip retornado" title="Voltaram para a caixa ao fim do dia: são de ontem, não de hoje">
+                Retornado · do dia {u.diasRetornados.map(diaCurto).join(', ')} ({u.retornados})
+              </span>
+            )}
             {algumaSub && <span className="projecao-txt"> · {u.subcaixas.filter((c) => marcadas.has(c.chave)).length} caixa(s) escolhida(s)</span>}
           </span>
         </span>
@@ -104,17 +110,18 @@ function CardUnidade({ u, marcadas, nomes, onAlternar, dentroDeMarcado = false }
 function motivoBloqueio(p: ResumoPerfil): string | null {
   if (!p.ajudante.ativo) return 'Inativo — não recebe repasse. Ative o perfil em Ajudantes.';
   if (p.carga?.situacao === 'EM_ROTA') return `Em rota com ${p.carga.codigo} desde ${dataHora(p.rotaIniciadaEm)} — carga fechada, não recebe novas caixas.`;
-  if (p.carga?.situacao === 'CONCLUIDA') return `Rota concluída (${p.carga.codigo}) — finalize a carga no perfil para receber novas ruas.`;
+  if (p.carga?.situacao === 'CONCLUIDA') return `Rota concluída (${p.carga.codigo}) — finalize a carga no perfil (ou use o Novo dia) para receber novas caixas.`;
   return null;
 }
 
-function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciarRota }: {
+function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciarRota, onRepassar }: {
   p: ResumoPerfil;
   escolhido: boolean;
   aReceber: { unidades: number; pacotes: number };
   iniciando: boolean;
   onEscolher: () => void;
   onIniciarRota: () => void;
+  onRepassar: () => void;
 }) {
   const a = p.ajudante;
   const bloqueio = motivoBloqueio(p);
@@ -142,6 +149,21 @@ function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciar
           {bloqueio} {!a.ativo && <a href="#/ajudantes">Ir para Ajudantes →</a>}
         </p>
       )}
+      {p.repasse && (
+        <p className="repasse-aviso" role="status">
+          ↔ {p.repasse.sentido === 'enviado'
+            ? `Repasse do ${a.nome} para ${p.repasse.com}`
+            : `Repasse do ${p.repasse.com} para ${a.nome}`} · {dataHora(p.repasse.em)} · {p.repasse.pacotes} pacote(s)
+        </p>
+      )}
+      {p.carga?.situacao === 'EM_ROTA' && (
+        <div className="acao-rota">
+          <span className="chip perfil-EM_ROTA">EM ROTA</span>
+          <button type="button" onClick={onRepassar} title="Se aconteceu algo com o ajudante: passa a rota para outro ajudante ativo">
+            Repassar rota
+          </button>
+        </div>
+      )}
       {montada && (
         <div className="acao-rota">
           <span className="chip perfil-MONTADA">MONTADA</span>
@@ -157,6 +179,7 @@ function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciar
         {p.carga && !escolhido && (
           <span className="fraco">{p.recebidaNoStreetEm ? `no Street ✓ ${dataHora(p.recebidaNoStreetEm)}` : 'Street ainda não carregou (recebe sozinho)'}</span>
         )}
+        <span className={`street-visto ${p.streetVistoEm ? '' : 'nunca'}`}>{streetVisto(p.streetVistoEm)}</span>
         <a className="abrir" href={`#/ajudantes/${a.id}`}>perfil →</a>
       </div>
     </div>
@@ -184,6 +207,7 @@ export function Orquestrador() {
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro' | 'info'; texto: string } | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [iniciando, setIniciando] = useState<string | null>(null);
+  const [repassando, setRepassando] = useState<ResumoPerfil | null>(null);
 
   const unidades = dados.dados?.unidades ?? [];
   const perfis = dados.dados?.perfis ?? [];
@@ -288,6 +312,7 @@ export function Orquestrador() {
         </div>
         <div className="acoes">
           <a href="#/importar" className={`chip chip-status ${statusLote.cls}`}>{statusLote.txt}</a>
+          <a href="#/novo-dia" className="botao-sec" title="Fecha as cargas abertas e decide o que fazer com o que sobrou">Novo dia</a>
           <button type="button" className="primario" disabled={!podeEntregar} onClick={entregar}>
             {rotuloBotao}
           </button>
@@ -361,6 +386,7 @@ export function Orquestrador() {
                 iniciando={iniciando === p.ajudante.id}
                 onEscolher={() => setDestino(destino === p.ajudante.id ? null : p.ajudante.id)}
                 onIniciarRota={() => iniciarRota(p)}
+                onRepassar={() => setRepassando(p)}
               />
             ))}
             {dados.dados && perfis.length === 0 && (
@@ -380,6 +406,19 @@ export function Orquestrador() {
             {rotuloBotao}
           </button>
         </div>
+      )}
+      {repassando?.carga && (
+        <RepassarRota
+          cargaId={repassando.carga.id}
+          de={repassando.ajudante.nome}
+          onFechar={() => setRepassando(null)}
+          onFeito={(texto) => {
+            setRepassando(null);
+            setDestino(null);
+            setMsg({ tipo: 'ok', texto });
+            dados.recarregar();
+          }}
+        />
       )}
     </section>
   );

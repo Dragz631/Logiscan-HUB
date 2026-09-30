@@ -22,6 +22,7 @@ export const ESTADOS = [
   'ENTREGUE',
   'INSUCESSO',
   'RETORNADO',
+  'DEVOLVIDO',
   'PRONTO_PARA_BAIXA',
   'BAIXADO',
 ] as const;
@@ -31,9 +32,12 @@ export type EstadoPacote = (typeof ESTADOS)[number];
 export const TRANSICOES: Record<EstadoPacote, readonly EstadoPacote[]> = {
   NAO_ATRIBUIDO: ['ATRIBUIDO'],
   ATRIBUIDO: ['ATRIBUIDO', 'NAO_ATRIBUIDO', 'EM_ROTA'], // ATRIBUIDO→ATRIBUIDO = reatribuição
-  EM_ROTA: ['ENTREGUE', 'INSUCESSO'],
-  INSUCESSO: ['EM_ROTA', 'RETORNADO', 'ATRIBUIDO'],
-  RETORNADO: ['NAO_ATRIBUIDO', 'ATRIBUIDO'],
+  // Fim do dia: o que não foi entregue volta para a caixa (RETORNADO) ou sai para o galpão (DEVOLVIDO).
+  EM_ROTA: ['ENTREGUE', 'INSUCESSO', 'RETORNADO', 'DEVOLVIDO'],
+  INSUCESSO: ['EM_ROTA', 'RETORNADO', 'ATRIBUIDO', 'DEVOLVIDO'],
+  RETORNADO: ['NAO_ATRIBUIDO', 'ATRIBUIDO', 'DEVOLVIDO'],
+  // Devolvido ao galpão só volta se o mesmo código chegar de novo num lote (reabertura).
+  DEVOLVIDO: ['NAO_ATRIBUIDO'],
   ENTREGUE: ['PRONTO_PARA_BAIXA'],
   PRONTO_PARA_BAIXA: ['BAIXADO'],
   BAIXADO: [],
@@ -63,6 +67,14 @@ export const CAMPOS_DADOS: readonly (keyof DadosPacote)[] = [
 /** Pendências de revisão do HUB (ortogonais ao estado — não viram estados novos). */
 export type Pendencia = 'DESTINO_A_CONFIRMAR';
 
+/** "Retornado · do dia 26/09": de onde o pacote voltou para a caixa ao fim do dia. */
+export interface RetornadoDe {
+  /** AAAA-MM-DD (São Paulo) do dia em que a rota saiu. */
+  dia: string;
+  carga: string;
+  ajudante: string;
+}
+
 export interface OrigemPacote {
   loteId: string;
   arquivo: string;
@@ -88,6 +100,8 @@ export interface Pacote {
   confirmacaoEntrega: ConfirmacaoEntrega | null;
   /** Só com estado INSUCESSO: motivo do último insucesso (o histórico guarda todos). */
   motivoInsucesso: string | null;
+  /** Só com estado RETORNADO: de qual dia/carga/ajudante ele voltou para a caixa. */
+  retornadoDe: RetornadoDe | null;
   pendencias: Pendencia[];
   origem: OrigemPacote;
   criadoEm: string;

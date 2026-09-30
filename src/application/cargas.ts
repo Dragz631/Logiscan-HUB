@@ -168,6 +168,21 @@ export function documentoDaCarga(ctx: Contexto, carga: Carga, agora: string): Do
     .filter((p): p is Pacote => !!p && p.cargaId === carga.id && (p.estado === 'EM_ROTA' || p.estado === 'ATRIBUIDO'));
   const identidade = identidadeDaRua(ctx);
   const caixaDoc = caixaParaCarga(ctx);
+  const eventosCarga = ctx.armazem.cargas.eventos(carga.id);
+  const criada = eventosCarga.find((e) => e.tipo === 'CARGA_CRIADA');
+  const de = criada && criada.tipo === 'CARGA_CRIADA' ? criada.dados.repassadaDe : undefined;
+  const repassos = eventosCarga.filter((e) => e.tipo === 'ROTA_REPASSADA');
+  const ultimoRepasso = repassos.at(-1);
+  const repassadaPara =
+    ultimoRepasso && ultimoRepasso.tipo === 'ROTA_REPASSADA'
+      ? {
+          carga_codigo: ultimoRepasso.dados.paraCarga.codigo,
+          ajudante: ultimoRepasso.dados.para,
+          em: ultimoRepasso.ocorridoEm,
+          motivo: ultimoRepasso.dados.motivo,
+          pacotes: repassos.reduce((n, e) => n + (e.tipo === 'ROTA_REPASSADA' ? e.dados.pacotes : 0), 0),
+        }
+      : null;
   const itens = new Map<string, ItemCargaV0>();
   const linhas = pacotes.map((p) => {
     const rua = identidade(p);
@@ -209,6 +224,10 @@ export function documentoDaCarga(ctx: Contexto, carga: Carga, agora: string): Do
       criada_por: carga.criadaPor,
       situacao: carga.rotaIniciadaEm ? 'EM_ROTA' : 'MONTADA',
       rota_iniciada_em: carga.rotaIniciadaEm,
+      repassada_de: de
+        ? { carga_codigo: de.carga.codigo, ajudante: de.ajudante, em: criada!.ocorridoEm, motivo: de.motivo, pacotes: pacotes.length }
+        : null,
+      repassada_para: repassadaPara,
     },
     ajudante: carga.ajudante,
     pacotes: linhas,
@@ -274,9 +293,10 @@ export function receberRetornoStreet(
         conta(carga.id).repetidos++;
         continue;
       }
-      const motivo = validarEvento(ev, carga, doc.ajudante.id);
+      const motivo = validarEvento(ev, carga, doc.ajudante.id) ?? null;
       if (motivo) {
-        recusar(motivo, true);
+        // "não faz parte da carga" pode ser repasse ou fim de dia: diz qual (o operador resolve).
+        recusar(motivo.startsWith('pacote não faz parte') ? explicarForaDaCarga(ctx, ev.hub_pacote_id, carga, motivo) : motivo, true);
         continue;
       }
       try {
@@ -291,19 +311,23 @@ export function receberRetornoStreet(
         };
         const ref = { carga: { id: carga.id, codigo: carga.codigo }, ajudante: carga.ajudante, idEventoStreet: ev.id_evento };
         if (ev.tipo === 'INSUCESSO_REGISTRADO') {
-          registrarEvento(armazem, { ...comum, tipo: 'INSUCESSO_REGISTRADO', dados: { ...ref, motivo: ev.motivo ?? '' } });
+          registrarEvento(armazem, { ...comum, tipo: 'INSUCESSO_REGISTRADO', dados: { ...ref, motivo: ev.motivo ?? '', ...(ev.texto ? { texto: ev.texto } : {}) } });
         } else {
           registrarEvento(armazem, {
             ...comum,
             tipo: 'ENTREGA_REGISTRADA',
-            dados: { ...ref, recebedor: ev.recebedor ? { tipo: ev.recebedor.tipo, detalhes: ev.recebedor.detalhes } : null },
+            dados: {
+              ...ref,
+              recebedor: ev.recebedor ? { tipo: ev.recebedor.tipo, detalhes: ev.recebedor.detalhes } : null,
+              ...(ev.texto ? { texto: ev.texto } : {}),
+            },
           });
         }
         total.aceitos++;
         conta(carga.id).aceitos++;
       } catch (e) {
         if (!(e instanceof ErroDominio)) throw e;
-        recusar(e.message, true);
+        recusar(e.codigo === 'FORA_DA_CARGA' ? explicarForaDaCarga(ctx, ev.hub_pacote_id, carga, e.message) : e.message, true);
       }
     }
 
@@ -320,6 +344,22 @@ export function receberRetornoStreet(
     }
     return total;
   });
+}
+
+/**
+ * O Street reportou algo de um pacote que já não está nesta carga. Três causas reais, ditas com clareza:
+ * repasse na hora para outro ajudante, fim do dia (voltou para a caixa / foi ao galpão) ou outra.
+ */
+function explicarForaDaCarga(ctx: Contexto, pacoteId: string, carga: Carga, padrao: string): string {
+  const p = ctx.armazem.pacotes.porId(pacoteId);
+  if (!p) return padrao;
+  if (p.cargaId && p.cargaId !== carga.id) {
+    const outra = ctx.armazem.cargas.porId(p.cargaId);
+    return `o pacote foi repassado para ${outra?.ajudante.nome ?? 'outro ajudante'} (carga ${outra?.codigo ?? '?'}); o registro de ${carga.ajudante.nome} não foi aplicado`;
+  }
+  if (p.estado === 'RETORNADO') return `o dia foi encerrado e o pacote voltou para a caixa como Retornado; o registro de ${carga.ajudante.nome} não foi aplicado`;
+  if (p.estado === 'DEVOLVIDO') return `o dia foi encerrado e o pacote foi devolvido ao galpão; o registro de ${carga.ajudante.nome} não foi aplicado`;
+  return padrao;
 }
 
 function validarEvento(ev: EventoStreetV0, carga: Carga, ajudanteDoArquivo: string): string | null {

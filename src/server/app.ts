@@ -38,6 +38,8 @@ import {
 } from '../application/orquestracao';
 import { criarRegiao, definirRegiao, listarRegioes, mapaDeRegioes } from '../application/regioes';
 import { classificarPacote, classificarRua, pacotesDaCaixa, visaoTriagem } from '../application/triagem';
+import { detalharDia, encerrarDia, listarDias, previaNovoDia } from '../application/novoDia';
+import { pendenciasDaRota, repassarRota } from '../application/repasseRota';
 import { criarRotasStreet } from './street';
 import type { Contexto } from '../application/portas';
 import { ErroDominio } from '../domain/eventos';
@@ -71,6 +73,19 @@ const Esquemas = {
     ator,
     substituir: z.boolean().optional(),
     prioridade: z.number().int().positive().nullable().optional(),
+  }),
+  novoDia: z.object({
+    ator,
+    chave: z.string().min(1),
+    historico: z.boolean(),
+    destinos: z.record(z.string(), z.enum(['amanha', 'galpao'])),
+  }),
+  repassarRota: z.object({
+    paraAjudanteId: z.string().min(1),
+    caixas: z.array(z.string()).optional(),
+    ator,
+    chave: z.string().min(1),
+    motivo: z.string().optional(),
   }),
   triagemRua: z.object({ rua: z.string().min(1), caixaId: z.string().min(1), ator, substituir: z.boolean().optional() }),
   triagemPacote: z.object({
@@ -251,6 +266,28 @@ export function criarApi(ctx: Contexto): express.Router {
 
   api.get('/cargas/:id', (req, res) => {
     res.json(detalharCarga(ctx, req.params.id));
+  });
+
+  /** NOVO DIA: o que vai ser fechado (só leitura) e o fechamento (tudo ou nada, idempotente pela chave). */
+  api.get('/novo-dia/previa', (_req, res) => {
+    res.json(previaNovoDia(ctx));
+  });
+  api.post('/novo-dia', (req, res) => {
+    res.json(encerrarDia(ctx, corpo(Esquemas.novoDia, req.body)));
+  });
+  api.get('/dias', (_req, res) => {
+    res.json(listarDias(ctx));
+  });
+  api.get('/dias/:id', (req, res) => {
+    res.json(detalharDia(ctx, req.params.id));
+  });
+
+  /** REPASSE NA HORA: a rota em andamento passa para outro ajudante ativo (carga nova, eventos próprios). */
+  api.get('/cargas/:id/pendencias-da-rota', (req, res) => {
+    res.json(pendenciasDaRota(ctx, req.params.id));
+  });
+  api.post('/cargas/:id/repassar-rota', (req, res) => {
+    res.json(repassarRota(ctx, { cargaId: req.params.id, ...corpo(Esquemas.repassarRota, req.body) }));
   });
 
   /** Ação explícita do operador: a carga montada sai para a rua. */

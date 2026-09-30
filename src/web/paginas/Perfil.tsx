@@ -12,9 +12,10 @@ import type { DetalhePerfil, Parada } from '../../application/orquestracao';
 import { descreverEvento } from '../../domain/eventos';
 import { api } from '../api';
 import { useOperador } from '../contexto';
-import { ROTULO_ESTADO, dataHora } from '../formato';
+import { ROTULO_ESTADO, dataHora, streetVisto } from '../formato';
 import { Aviso, useCarregar } from './comum';
 import { BarraProgresso, ROTULO_SITUACAO_PERFIL } from './Orquestrador';
+import { RepassarRota } from './RepassarRota';
 
 /** Na sequência de paradas, o que ainda não teve desfecho aparece como "Pendente" (visão do Street). */
 const ROTULO_PARADA: Record<string, string> = { ATRIBUIDO: 'Pendente', EM_ROTA: 'Pendente', ENTREGUE: 'Entrega registrada', INSUCESSO: 'Insucesso' };
@@ -105,6 +106,7 @@ export function PerfilPagina({ id }: { id: string }) {
   const [editando, setEditando] = useState(false);
   const [form, setForm] = useState({ nome: '', veiculo: '', ativo: true });
   const [reatribuirPara, setReatribuirPara] = useState<Record<string, string>>({});
+  const [repassando, setRepassando] = useState(false);
 
   if (det.erro) return <Aviso>{det.erro}</Aviso>;
   const p = det.dados;
@@ -164,6 +166,13 @@ export function PerfilPagina({ id }: { id: string }) {
                 </span>
               </p>
             )}
+            <p className={`street-visto ${p.streetVistoEm ? '' : 'nunca'}`}>{streetVisto(p.streetVistoEm)}</p>
+            {p.repasse && (
+              <p className="repasse-aviso" role="status">
+                ↔ {p.repasse.sentido === 'enviado' ? `Repasse do ${a.nome} para ${p.repasse.com}` : `Repasse do ${p.repasse.com} para ${a.nome}`} ·{' '}
+                {dataHora(p.repasse.em)} · {p.repasse.pacotes} pacote(s)
+              </p>
+            )}
             <div className="linha">
               {montada && p.pacotes > 0 && (
                 <button
@@ -175,6 +184,11 @@ export function PerfilPagina({ id }: { id: string }) {
                   }
                 >
                   Iniciar rota
+                </button>
+              )}
+              {p.carga?.situacao === 'EM_ROTA' && (
+                <button type="button" onClick={() => setRepassando(true)} title="Se aconteceu algo com o ajudante: passa a rota para outro ajudante ativo">
+                  Repassar rota
                 </button>
               )}
               {p.carga && p.carga.situacao !== 'MONTADA' && (
@@ -301,6 +315,18 @@ export function PerfilPagina({ id }: { id: string }) {
           )}
         </div>
       </div>
+      {repassando && p.carga && (
+        <RepassarRota
+          cargaId={p.carga.id}
+          de={a.nome}
+          onFechar={() => setRepassando(false)}
+          onFeito={(texto) => {
+            setRepassando(false);
+            setMsg({ tipo: 'ok', texto });
+            det.recarregar();
+          }}
+        />
+      )}
     </section>
   );
 }

@@ -8,6 +8,7 @@ import { useState } from 'react';
 import type { CaixaNaTriagem, PacoteTriagem, RuaSemCaixa } from '../../application/triagem';
 import { api } from '../api';
 import { useOperador } from '../contexto';
+import { diaCurto } from '../formato';
 import { Aviso, useCarregar } from './comum';
 
 export const rotuloCaixa = (c: { numero: string | null; nome: string }) => (c.numero ? `${c.numero} · ${c.nome}` : c.nome);
@@ -36,7 +37,10 @@ function LinhaPacote({ p, caixas, onMover, rotuloBotao }: {
     <li className="pacote-triagem">
       <span className="numero-badge">{p.numero || 'S/N'}</span>
       <span className="quem">
-        <b>{p.destinatario || '—'}</b>
+        <b>
+          {p.destinatario || '—'}
+          {p.retornadoDia && <span className="chip retornado">Retornado · do dia {diaCurto(p.retornadoDia)}</span>}
+        </b>
         <span className="fraco">
           {p.rua}
           {p.complemento && ` · ${p.complemento}`} · <a href={`#/pacotes/${p.id}`}>#{p.codigo.slice(-4)}</a>

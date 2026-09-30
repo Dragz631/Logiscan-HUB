@@ -13,6 +13,8 @@ import { PerfilPagina } from './paginas/Perfil';
 import { Regioes } from './paginas/Regioes';
 import { PacotePagina } from './paginas/Pacote';
 import { Triagem } from './paginas/Triagem';
+import { Dias } from './paginas/Dias';
+import { NovoDia } from './paginas/NovoDia';
 
 const CHAVE_OPERADOR = 'hub.operador';
 const lerOperador = () => {
@@ -50,6 +52,8 @@ function App() {
   else if (pagina === 'inventario') conteudo = <Inventario />;
   else if (pagina === 'regioes') conteudo = <Regioes />;
   else if (pagina === 'triagem') conteudo = <Triagem />;
+  else if (pagina === 'novo-dia') conteudo = <NovoDia />;
+  else if (pagina === 'dias') conteudo = <Dias />;
   else if (pagina === 'cargas' && id) conteudo = <CargaPagina id={id} />;
   else if (pagina === 'cargas') conteudo = <Cargas />;
   else conteudo = <Orquestrador />;
@@ -68,6 +72,7 @@ function App() {
             <span className="secao">Operação</span>
             <a href="#/" className={ativo('')}>Orquestrador de repasse</a>
             <a href="#/cargas" className={ativo('cargas')}>Cargas</a>
+            <a href="#/dias" className={ativo('dias') || ativo('novo-dia')}>Dias</a>
             <a href="#/ajudantes" className={ativo('ajudantes')}>Ajudantes</a>
             <a href="#/regioes" className={ativo('regioes')}>Regiões</a>
             <span className="secao">Pacotes</span>

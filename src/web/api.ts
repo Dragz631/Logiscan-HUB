@@ -3,6 +3,9 @@ import type { DetalheCarga, ResultadoRetorno, ResumoCarga } from '../application
 import type { DadosPerfil, DetalhePerfil, ResumoPerfil, RuaNoOrquestrador, UnidadeRepasse } from '../application/orquestracao';
 import type { RegiaoComRuas, ResultadoDefinicao } from '../application/regioes';
 import type { PacoteTriagem, ResultadoClassificacao, VisaoTriagem } from '../application/triagem';
+import type { PreviaNovoDia } from '../application/novoDia';
+import type { PendenciasDaRota, ResultadoRepasseRota } from '../application/repasseRota';
+import type { Dia } from '../domain/dias';
 import type { Regiao } from '../domain/regioes';
 import type { DocumentoCargaV0 } from '../contracts/cargaV0';
 import type { Pacote } from '../domain/pacote';
@@ -47,6 +50,15 @@ export const api = {
       regioes: Regiao[];
       aguardandoRevisao: { pacotes: number; ruas: number };
     }>('/orquestrador'),
+  previaNovoDia: () => chamar<PreviaNovoDia>('/novo-dia/previa'),
+  encerrarDia: (destinos: Record<string, 'amanha' | 'galpao'>, historico: boolean, ator: string, chave: string) =>
+    chamar<{ dia: Dia; jaEncerrado: boolean }>('/novo-dia', { body: { destinos, historico, ator, chave } }),
+  dias: () => chamar<Dia[]>('/dias'),
+  pendenciasDaRota: (cargaId: string) => chamar<PendenciasDaRota>(`/cargas/${cargaId}/pendencias-da-rota`),
+  repassarRota: (cargaId: string, paraAjudanteId: string, caixas: string[] | undefined, motivo: string, ator: string) =>
+    chamar<ResultadoRepasseRota>(`/cargas/${cargaId}/repassar-rota`, {
+      body: { paraAjudanteId, caixas, motivo, ator, chave: novaChave() },
+    }),
   triagem: () => chamar<VisaoTriagem>('/triagem'),
   pacotesDaCaixa: (caixaId: string) => chamar<PacoteTriagem[]>(`/triagem/caixas/${caixaId}`),
   classificarRua: (rua: string, caixaId: string, ator: string, substituir = false) =>

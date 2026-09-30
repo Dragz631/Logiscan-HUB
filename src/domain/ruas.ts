@@ -35,6 +35,9 @@ export interface ResumoRua {
   entregues: number;
   insucessos: number;
   revisao: number;
+  /** Voltaram para a caixa ao fim do dia (Retornado) e os dias de onde vieram (AAAA-MM-DD). */
+  retornados: number;
+  diasRetornados: string[];
   /** Destinos distintos na rua (nº + contexto). */
   destinos: number;
   /** Como a rua aparece nos cards (útil quando a rua é um grupo, ex.: "Diversos"). */
@@ -49,12 +52,13 @@ export interface ResumoRua {
  * dentro de uma carga ainda ativa (não finalizada).
  */
 export function naOperacao(p: Pacote, cargasAtivas: ReadonlySet<string>): boolean {
-  if (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO' || p.estado === 'EM_ROTA') return true;
+  // RETORNADO = voltou para a caixa ao fim do dia: continua na operação, pronto para novo repasse.
+  if (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO' || p.estado === 'EM_ROTA' || p.estado === 'RETORNADO') return true;
   return p.cargaId !== null && cargasAtivas.has(p.cargaId);
 }
 
 export function estadoDaRua(estados: EstadoPacote[]): EstadoRua {
-  const comAjudante = estados.filter((e) => e !== 'NAO_ATRIBUIDO');
+  const comAjudante = estados.filter((e) => e !== 'NAO_ATRIBUIDO' && e !== 'RETORNADO');
   if (comAjudante.length === 0) return 'DISPONIVEL';
   if (comAjudante.some((e) => e === 'EM_ROTA')) return 'EM_ROTA';
   if (comAjudante.every((e) => ESTADOS_DESFECHO.includes(e))) return 'CONCLUIDA';
@@ -85,12 +89,14 @@ export function agruparPorRua(pacotes: Pacote[], ruaDe: RuaDoPacote = ruaDoCard)
       chave,
       nome,
       total: lista.length,
-      disponiveis: conta((p) => p.estado === 'NAO_ATRIBUIDO'),
+      disponiveis: conta((p) => p.estado === 'NAO_ATRIBUIDO' || p.estado === 'RETORNADO'),
       atribuidos: conta((p) => p.responsavelId !== null),
       emRota: conta((p) => p.estado === 'EM_ROTA'),
       entregues: conta((p) => p.estado === 'ENTREGUE'),
       insucessos: conta((p) => p.estado === 'INSUCESSO'),
       revisao: conta((p) => p.pendencias.length > 0),
+      retornados: conta((p) => p.estado === 'RETORNADO'),
+      diasRetornados: [...new Set(lista.map((p) => p.retornadoDe?.dia).filter((d): d is string => !!d))].sort(),
       destinos: new Set(lista.map((p) => p.destinoId ?? `sem-destino:${p.id}`)).size,
       logradouros: [...grafias.keys()].sort((a, b) => a.localeCompare(b, 'pt-BR')),
       responsaveis: [...new Set(lista.map((p) => p.responsavelId).filter((r): r is string => !!r))],

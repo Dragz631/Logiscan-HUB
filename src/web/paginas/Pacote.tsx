@@ -3,7 +3,7 @@ import { rotuloDestino } from '../../domain/destinoPacote';
 import { api } from '../api';
 import { useOperador } from '../contexto';
 import { ROTULO_REQUISITO } from '../../domain/confirmacao';
-import { dataHora } from '../formato';
+import { dataHora, diaCurto } from '../formato';
 import { Aviso, Estado, useCarregar } from './comum';
 
 export function PacotePagina({ id }: { id: string }) {
@@ -59,6 +59,11 @@ export function PacotePagina({ id }: { id: string }) {
         <div className="cartao">
           <h3>Status</h3>
           <Estado estado={p.estado} />
+          {p.retornadoDe && (
+            <span className="chip retornado" title={`Carga ${p.retornadoDe.carga}, com ${p.retornadoDe.ajudante}`}>
+              Retornado · do dia {diaCurto(p.retornadoDe.dia)}
+            </span>
+          )}
           {p.pendencias.length > 0 && <span className="selo alerta">revisão pendente</span>}
           {p.confirmacaoEntrega && (
             <p className="fraco">
@@ -153,6 +158,12 @@ export function PacotePagina({ id }: { id: string }) {
             <div>
               <b>{e.descricao}</b>
               {e.aviso && <div className="selo alerta">{e.aviso}</div>}
+              {(e.tipo === 'ENTREGA_REGISTRADA' || e.tipo === 'INSUCESSO_REGISTRADO') && e.dados.texto && (
+                <details className="texto-enviado">
+                  <summary>Texto enviado ao cliente</summary>
+                  <pre>{e.dados.texto}</pre>
+                </details>
+              )}
               <div className="fraco">
                 por {e.ator} · {e.origem}
               </div>

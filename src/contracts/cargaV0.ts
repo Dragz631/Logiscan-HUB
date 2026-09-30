@@ -66,6 +66,16 @@ export const DocumentoCargaV0 = z.object({
     /** Opcional (acrescentado sem quebrar v0): MONTADA = ainda no galpão; EM_ROTA = rota iniciada no HUB. */
     situacao: z.enum(['MONTADA', 'EM_ROTA']).optional(),
     rota_iniciada_em: z.string().nullable().optional(),
+    /** Repasse na hora (opcional, não quebra a v0): esta carga nasceu da rota de outro ajudante. */
+    repassada_de: z
+      .object({ carga_codigo: z.string(), ajudante: z.object({ id: z.string(), nome: z.string() }), em: z.string(), motivo: z.string(), pacotes: z.number() })
+      .nullable()
+      .optional(),
+    /** Repasse na hora: parte desta rota passou para outro ajudante (o Street tira esses pacotes da tela). */
+    repassada_para: z
+      .object({ carga_codigo: z.string(), ajudante: z.object({ id: z.string(), nome: z.string() }), em: z.string(), motivo: z.string(), pacotes: z.number() })
+      .nullable()
+      .optional(),
   }),
   ajudante: z.object({ id: z.string().min(1), nome: z.string().min(1) }),
   pacotes: z.array(PacoteCargaV0),

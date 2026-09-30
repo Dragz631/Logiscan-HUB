@@ -13,6 +13,7 @@ import type {
   Lote,
   RepositorioAjudantes,
   RepositorioCargas,
+  RepositorioDias,
   RepositorioPessoas,
   RepositorioRegioes,
   RepositorioDestinos,
@@ -25,6 +26,7 @@ import type { Carga, EventoCarga } from '../domain/carga';
 import type { Destino } from '../domain/destinoPacote';
 import type { Associacao, EventoRegiao, Regiao } from '../domain/regioes';
 import type { EventoPessoa, MemoriaPessoa } from '../domain/caixas';
+import type { Dia } from '../domain/dias';
 import { chaveTexto } from '../domain/destino/texto';
 import type { Evento } from '../domain/eventos';
 import type { Pacote } from '../domain/pacote';
@@ -82,6 +84,7 @@ function pacoteDaLinha(r: Linha): Pacote {
     caixaId: str(r.caixa_id),
     confirmacaoEntrega: r.confirmacao_entrega ? parse(r.confirmacao_entrega) : null,
     motivoInsucesso: str(r.motivo_insucesso),
+    retornadoDe: r.retornado_de ? parse(r.retornado_de) : null,
     pendencias: parse(r.pendencias),
     origem: {
       loteId: String(r.origem_lote_id),
@@ -138,6 +141,7 @@ class Pacotes implements RepositorioPacotes {
       json(p.destinoCandidatos), p.estado, p.responsavelId, json(p.pendencias), p.origem.loteId,
       p.origem.arquivo, p.origem.card, p.criadoEm, p.atualizadoEm, p.versao, p.cargaId,
       p.confirmacaoEntrega ? json(p.confirmacaoEntrega) : null, p.motivoInsucesso, p.caixaId,
+      p.retornadoDe ? json(p.retornadoDe) : null,
     ];
     if (versaoEsperada === null) {
       this.db
@@ -145,8 +149,8 @@ class Pacotes implements RepositorioPacotes {
           `INSERT INTO pacotes (transportadora, codigo, destinatario, rua, rua_detalhe, numero, complemento, bairro,
             cidade, uf, cep, destino_id, destino_candidatos, estado, responsavel_id, pendencias, origem_lote_id,
             origem_arquivo, origem_card, criado_em, atualizado_em, versao, carga_id, confirmacao_entrega, motivo_insucesso,
-            caixa_id, id)
-           VALUES (${new Array(27).fill('?').join(',')})`,
+            caixa_id, retornado_de, id)
+           VALUES (${new Array(28).fill('?').join(',')})`,
         )
         .run(...valores, p.id);
       return;
@@ -156,7 +160,7 @@ class Pacotes implements RepositorioPacotes {
         `UPDATE pacotes SET transportadora=?, codigo=?, destinatario=?, rua=?, rua_detalhe=?, numero=?, complemento=?,
           bairro=?, cidade=?, uf=?, cep=?, destino_id=?, destino_candidatos=?, estado=?, responsavel_id=?, pendencias=?,
           origem_lote_id=?, origem_arquivo=?, origem_card=?, criado_em=?, atualizado_em=?, versao=?, carga_id=?,
-          confirmacao_entrega=?, motivo_insucesso=?, caixa_id=?
+          confirmacao_entrega=?, motivo_insucesso=?, caixa_id=?, retornado_de=?
          WHERE id=? AND versao=?`,
       )
       .run(...valores, p.id, versaoEsperada);
@@ -339,6 +343,7 @@ class Ajudantes implements RepositorioAjudantes {
     ativo: Number(r.ativo) === 1,
     criadoEm: String(r.criado_em),
     veiculo: str(r.veiculo),
+    streetVistoEm: str(r.street_visto_em),
   });
 
   porId(id: string) {
@@ -360,6 +365,41 @@ class Ajudantes implements RepositorioAjudantes {
     this.db
       .prepare('UPDATE ajudantes SET nome = ?, ativo = ?, veiculo = ? WHERE id = ?')
       .run(a.nome, a.ativo ? 1 : 0, a.veiculo, a.id);
+  }
+
+  marcarStreetVisto(id: string, em: string) {
+    this.db.prepare('UPDATE ajudantes SET street_visto_em = ? WHERE id = ?').run(em, id);
+  }
+}
+
+class Dias implements RepositorioDias {
+  constructor(private db: DatabaseSync) {}
+
+  private linha = (r: Linha): Dia => ({
+    id: String(r.id),
+    dataRef: String(r.data_ref),
+    encerradoEm: String(r.encerrado_em),
+    encerradoPor: String(r.encerrado_por),
+    historico: Number(r.historico) === 1,
+    resumo: parse(r.resumo),
+    chave: String(r.chave_idempotencia),
+  });
+
+  criar(d: Dia) {
+    this.db
+      .prepare('INSERT INTO dias (id, data_ref, encerrado_em, encerrado_por, historico, resumo, chave_idempotencia) VALUES (?,?,?,?,?,?,?)')
+      .run(d.id, d.dataRef, d.encerradoEm, d.encerradoPor, d.historico ? 1 : 0, json(d.resumo), d.chave);
+  }
+  listar() {
+    return this.db.prepare('SELECT * FROM dias ORDER BY encerrado_em DESC, id').all().map(this.linha);
+  }
+  porId(id: string) {
+    const r = this.db.prepare('SELECT * FROM dias WHERE id = ?').get(id);
+    return r ? this.linha(r) : undefined;
+  }
+  porChave(chave: string) {
+    const r = this.db.prepare('SELECT * FROM dias WHERE chave_idempotencia = ?').get(chave);
+    return r ? this.linha(r) : undefined;
   }
 }
 
@@ -581,6 +621,7 @@ export function criarArmazemSqlite(db: DatabaseSync): Armazem {
     cargas: new Cargas(db),
     regioes: new Regioes(db),
     pessoas: new Pessoas(db),
+    dias: new Dias(db),
     transacao<T>(fn: () => T): T {
       if (profundidade > 0) return fn(); // já dentro de uma transação
       db.exec('BEGIN IMMEDIATE');

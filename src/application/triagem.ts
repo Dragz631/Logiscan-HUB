@@ -29,6 +29,8 @@ export interface PacoteTriagem {
   complemento: string;
   cep: string;
   caixa: CaixaRef | null;
+  /** "Retornado · do dia 26/09": AAAA-MM-DD de onde voltou para a caixa (null = não é retornado). */
+  retornadoDia: string | null;
   /** Por que está nessa caixa: à mão, memória da pessoa ou da rua. */
   origem: 'manual' | 'pessoa' | 'rua' | null;
   /** Ainda no galpão, fora de carga: dá para mudar a caixa. */
@@ -61,7 +63,7 @@ export interface VisaoTriagem {
   aguardandoRevisao: number;
 }
 
-const podeMover = (p: Pacote) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO');
+const podeMover = (p: Pacote) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO' || p.estado === 'RETORNADO');
 
 function pacotesDaOperacao(ctx: Contexto): Pacote[] {
   const ativas = ctx.armazem.cargas.idsAtivas();
@@ -78,6 +80,7 @@ function linha(p: Pacote, c: { caixa: Regiao | null; origem: PacoteTriagem['orig
     complemento: p.dados.complemento,
     cep: p.dados.cep,
     caixa: c.caixa ? refCaixa(c.caixa) : null,
+    retornadoDia: p.retornadoDe?.dia ?? null,
     origem: c.origem,
     podeMover: podeMover(p),
   };

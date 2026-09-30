@@ -14,6 +14,7 @@ import {
   type OrigemPacote,
   type Pacote,
   type Pendencia,
+  type RetornadoDe,
   limparDados,
   podeTransitar,
 } from './pacote';
@@ -108,6 +109,8 @@ export type EventoEntregaRegistrada = Base<'ENTREGA_REGISTRADA', {
   ajudante: AjudanteRef;
   idEventoStreet: string;
   recebedor: { tipo: string; detalhes: string } | null;
+  /** O texto que o ajudante copiou e colou para o cliente (só texto; fotos vêm depois). */
+  texto?: string;
 }>;
 
 /** Tentativa sem sucesso registrada na rua. O motivo é obrigatório e fica no histórico. */
@@ -116,6 +119,7 @@ export type EventoInsucessoRegistrado = Base<'INSUCESSO_REGISTRADO', {
   ajudante: AjudanteRef;
   idEventoStreet: string;
   motivo: string;
+  texto?: string;
 }>;
 
 /**
@@ -125,6 +129,34 @@ export type EventoInsucessoRegistrado = Base<'INSUCESSO_REGISTRADO', {
  */
 export type EventoCorrecaoRegistrada = Base<'CORRECAO_REGISTRADA', {
   eventoCorrigido: { id: string; tipo: 'ENTREGA_REGISTRADA' | 'INSUCESSO_REGISTRADO' };
+  motivo: string;
+}>;
+
+/**
+ * FIM DO DIA (Novo dia): o que o ajudante não entregou.
+ *  'amanha' → volta para a CAIXA como RETORNADO, explícito que é do dia anterior (sem ajudante);
+ *  'galpao' → DEVOLVIDO ao galpão: sai da operação.
+ * `historico` false = dia de TESTE (só memória): nada some do banco, mas o dia fica marcado.
+ */
+export type EventoDiaEncerrado = Base<'DIA_ENCERRADO', {
+  dia: { id: string; data: string };
+  carga: CargaRef;
+  ajudante: AjudanteRef;
+  destino: 'amanha' | 'galpao';
+  historico: boolean;
+  retornadoDe: RetornadoDe;
+}>;
+
+/** O mesmo código de um pacote DEVOLVIDO chegou de novo num lote: volta ao galpão, disponível para a triagem. */
+export type EventoReabertoDoGalpao = Base<'REABERTO_DO_GALPAO', { loteId: string; arquivo: string }>;
+
+/**
+ * REPASSE NA HORA: a rota em andamento de um ajudante passa para outro (algo aconteceu na rua).
+ * O pacote continua EM_ROTA; troca o responsável e a carga (a carga do novo ajudante é uma carga NOVA).
+ */
+export type EventoRepassadoEmRota = Base<'REPASSADO_EM_ROTA', {
+  de: { carga: CargaRef; ajudante: AjudanteRef };
+  para: { carga: CargaRef; ajudante: AjudanteRef };
   motivo: string;
 }>;
 
@@ -141,7 +173,10 @@ export type Evento =
   | EventoEntregaRegistrada
   | EventoInsucessoRegistrado
   | EventoCorrecaoRegistrada
-  | EventoCaixaDefinida;
+  | EventoCaixaDefinida
+  | EventoDiaEncerrado
+  | EventoReabertoDoGalpao
+  | EventoRepassadoEmRota;
 
 export type TipoEvento = Evento['tipo'];
 
@@ -188,6 +223,7 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
       caixaId: null,
       confirmacaoEntrega: null,
       motivoInsucesso: null,
+      retornadoDe: null,
       pendencias: pendenciasDestino(d.destinoId, d.destinoCandidatos),
       origem: d.origem,
       criadoEm: e.ocorridoEm,
@@ -227,7 +263,7 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
       if (!podeTransitar(atual.estado, 'ATRIBUIDO')) {
         throw new ErroDominio('TRANSICAO_INVALIDA', `não é possível atribuir um pacote em ${atual.estado}`);
       }
-      return { ...base, estado: 'ATRIBUIDO', responsavelId: e.dados.ajudante.id };
+      return { ...base, estado: 'ATRIBUIDO', responsavelId: e.dados.ajudante.id, retornadoDe: null };
     case 'REATRIBUIDO':
       if (atual.responsavelId !== e.dados.de.id) {
         throw new ErroDominio('RESPONSAVEL_DIVERGENTE', 'o responsável atual não é o informado como anterior');
@@ -303,10 +339,44 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
       };
     }
     case 'CAIXA_DEFINIDA':
-      if (atual.cargaId !== null || (atual.estado !== 'NAO_ATRIBUIDO' && atual.estado !== 'ATRIBUIDO')) {
+      if (atual.cargaId !== null || (atual.estado !== 'NAO_ATRIBUIDO' && atual.estado !== 'ATRIBUIDO' && atual.estado !== 'RETORNADO')) {
         throw new ErroDominio('JA_SAIU_DA_TRIAGEM', 'o pacote já está numa carga: a caixa só muda na triagem, antes do repasse');
       }
       return { ...base, caixaId: e.dados.caixa.id };
+    case 'DIA_ENCERRADO': {
+      if (atual.cargaId !== e.dados.carga.id) {
+        throw new ErroDominio('FORA_DA_CARGA', `o pacote não está na carga ${e.dados.carga.codigo}`);
+      }
+      const alvo = e.dados.destino === 'amanha' ? 'RETORNADO' : 'DEVOLVIDO';
+      if ((atual.estado !== 'EM_ROTA' && atual.estado !== 'INSUCESSO') || !podeTransitar(atual.estado, alvo)) {
+        throw new ErroDominio('TRANSICAO_INVALIDA', `só encerra o dia de um pacote em rota ou com insucesso (está ${atual.estado})`);
+      }
+      return {
+        ...base,
+        estado: alvo,
+        responsavelId: null,
+        cargaId: null,
+        confirmacaoEntrega: null,
+        motivoInsucesso: null,
+        retornadoDe: alvo === 'RETORNADO' ? e.dados.retornadoDe : null,
+      };
+    }
+    case 'REABERTO_DO_GALPAO':
+      if (atual.estado !== 'DEVOLVIDO') {
+        throw new ErroDominio('NAO_DEVOLVIDO', `só reabre um pacote devolvido ao galpão (está ${atual.estado})`);
+      }
+      return { ...base, estado: 'NAO_ATRIBUIDO', responsavelId: null, cargaId: null, retornadoDe: null };
+    case 'REPASSADO_EM_ROTA':
+      if (atual.estado !== 'EM_ROTA') {
+        throw new ErroDominio('NAO_ESTA_EM_ROTA', `só se repassa pacote em rota (está ${atual.estado})`);
+      }
+      if (atual.cargaId !== e.dados.de.carga.id || atual.responsavelId !== e.dados.de.ajudante.id) {
+        throw new ErroDominio('FORA_DA_CARGA', `o pacote não está na carga ${e.dados.de.carga.codigo} de ${e.dados.de.ajudante.nome}`);
+      }
+      if (e.dados.de.ajudante.id === e.dados.para.ajudante.id) {
+        throw new ErroDominio('MESMO_RESPONSAVEL', 'o pacote já está com esse ajudante');
+      }
+      return { ...base, responsavelId: e.dados.para.ajudante.id, cargaId: e.dados.para.carga.id };
     case 'CORRECAO_REGISTRADA': {
       const alvo = e.dados.eventoCorrigido.tipo === 'ENTREGA_REGISTRADA' ? 'ENTREGUE' : 'INSUCESSO';
       if (atual.estado !== alvo) {
@@ -322,6 +392,8 @@ export function aplicarEvento(atual: Pacote | null, e: Evento): Pacote {
 export function reconstruir(eventos: Evento[]): Pacote | null {
   return eventos.reduce<Pacote | null>((p, e) => aplicarEvento(p, e), null);
 }
+
+const diaCurto = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 
 export const rotuloCaixa = (c: CaixaRef) => (c.numero ? `${c.numero} · ${c.nome}` : c.nome);
 
@@ -345,6 +417,16 @@ export function descreverEvento(e: Evento, nomeDestino?: (id: string) => string)
       return `Reatribuído: ${e.dados.de.nome} → ${e.dados.para.nome} (responsabilidade transferida)`;
     case 'INCLUIDO_EM_CARGA':
       return `Incluído na carga ${e.dados.carga.codigo} de ${e.dados.ajudante.nome} (carga montada)${e.dados.caixa ? ` — saiu na caixa ${rotuloCaixa(e.dados.caixa)}` : ''}`;
+    case 'DIA_ENCERRADO': {
+      const d = e.dados;
+      return d.destino === 'amanha'
+        ? `Novo dia (${diaCurto(d.dia.data)}): não entregue — voltou para a caixa como Retornado do dia ${diaCurto(d.retornadoDe.dia)} (carga ${d.carga.codigo}, com ${d.ajudante.nome})`
+        : `Novo dia (${diaCurto(d.dia.data)}): não entregue — devolvido ao galpão (carga ${d.carga.codigo}, com ${d.ajudante.nome})`;
+    }
+    case 'REABERTO_DO_GALPAO':
+      return `Reaberto no galpão: o mesmo código chegou de novo (${e.dados.arquivo})`;
+    case 'REPASSADO_EM_ROTA':
+      return `Repasse de rota: ${e.dados.de.ajudante.nome} → ${e.dados.para.ajudante.nome} (carga ${e.dados.de.carga.codigo} → ${e.dados.para.carga.codigo})${e.dados.motivo ? ` — ${e.dados.motivo}` : ''}`;
     case 'CAIXA_DEFINIDA':
       return `Triagem: colocado na caixa ${rotuloCaixa(e.dados.caixa)}${e.dados.anterior ? ` (estava em ${rotuloCaixa(e.dados.anterior)})` : ''}${e.dados.motivo ? ` — ${e.dados.motivo}` : ''}`;
     case 'RETIRADO_DA_CARGA':

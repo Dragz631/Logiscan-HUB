@@ -393,3 +393,28 @@ tr.marcada td { background: var(--marcada); }
 .caixa-botao { background: none; border: 0; padding: 0; width: 100%; text-align: left; color: inherit; font: inherit; }
 .card-unidade .subcaixas { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.3rem 0 0.1rem 1.6rem; }
 .aviso-revisao { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+
+/* V0.6 — Novo dia, Dias, Repassar rota, Retornado */
+.estado-DEVOLVIDO { background: var(--borda); color: var(--fraco); }
+.botao-sec { display: inline-flex; align-items: center; border: 1px solid var(--borda); border-radius: 8px; padding: 0.35rem 0.8rem; font-size: 0.85rem; color: var(--texto); background: var(--superficie); text-decoration: none; }
+.botao-sec:hover { border-color: var(--destaque); }
+.chip.retornado { color: var(--alerta); background: var(--alerta-fundo); border-color: transparent; margin-left: 0.4rem; font-size: 0.7rem; }
+.chip.perfil-EM_ROTA { color: var(--alerta); background: var(--alerta-fundo); border-color: transparent; }
+.repasse-aviso { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--destaque); background: var(--info-fundo); border-radius: 6px; padding: 0.3rem 0.5rem; }
+.street-visto { font-size: 0.72rem; color: var(--fraco); }
+.street-visto.nunca { color: var(--alerta); }
+.resumo-dia { display: flex; flex-direction: column; align-items: flex-end; font-size: 0.78rem; gap: 0.1rem; }
+.novo-dia .opcoes { border: 0; padding: 0; margin: 0.4rem 0 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.opcoes label { display: flex; gap: 0.6rem; align-items: flex-start; border: 1px solid var(--borda); border-radius: 8px; padding: 0.5rem 0.65rem; cursor: pointer; background: var(--superficie); }
+.opcoes label.marcada { border-color: var(--destaque); box-shadow: 0 0 0 1px var(--destaque); background: var(--marcada); }
+.opcoes label.travada { opacity: 0.55; cursor: default; }
+.opcoes label span { display: flex; flex-direction: column; font-size: 0.9rem; }
+.opcoes label small { color: var(--fraco); font-size: 0.75rem; }
+.modal-fundo { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: grid; place-items: center; z-index: 50; padding: 1rem; }
+.modal { background: var(--fundo); border: 1px solid var(--borda); border-radius: 12px; padding: 1rem 1.1rem; width: min(560px, 100%); max-height: 90vh; overflow: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+.modal h2, .modal h3 { margin: 0.3rem 0 0; }
+.frase-repasse { margin: 0.4rem 0 0; padding: 0.5rem 0.65rem; border-radius: 8px; background: var(--info-fundo); color: var(--destaque); }
+.campo { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--fraco); }
+.texto-enviado { margin-top: 0.3rem; font-size: 0.78rem; }
+.texto-enviado pre { white-space: pre-wrap; background: var(--superficie); border: 1px solid var(--borda); border-radius: 6px; padding: 0.4rem 0.5rem; margin: 0.25rem 0 0; }
+.dia-teste { border-style: dashed; }

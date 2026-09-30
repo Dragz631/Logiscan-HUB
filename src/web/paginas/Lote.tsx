@@ -12,6 +12,7 @@ const GRUPOS: { classe: ClasseItem; titulo: string; tom: 'alerta' | 'ok' | 'neut
   { classe: 'SEM_CODIGO', titulo: 'Sem código', tom: 'alerta' },
   { classe: 'CONFLITO_NO_ARQUIVO', titulo: 'Repetidos divergentes', tom: 'alerta' },
   { classe: 'PRONTO', titulo: 'Prontos para entrar', tom: 'ok' },
+  { classe: 'REABRIR', titulo: 'Devolvidos que voltaram (reabrem)', tom: 'ok' },
   { classe: 'JA_EXISTE', titulo: 'Já no inventário', tom: 'neutro' },
   { classe: 'DUPLICADO_NO_ARQUIVO', titulo: 'Repetidos iguais', tom: 'neutro' },
 ];
@@ -47,7 +48,7 @@ export function LotePagina({ id }: { id: string }) {
     if (!ator) return;
     try {
       const r = await api.confirmar(id, ator);
-      setMsg({ tipo: 'ok', texto: `Importação confirmada: ${r.criados} pacote(s) novo(s) no inventário, ${r.conflitosResolvidos} conflito(s) resolvido(s).` });
+      setMsg({ tipo: 'ok', texto: `Importação confirmada: ${r.criados} pacote(s) novo(s) no inventário${r.reabertos ? `, ${r.reabertos} devolvido(s) ao galpão reaberto(s)` : ''}, ${r.conflitosResolvidos} conflito(s) resolvido(s).` });
       lote.recarregar();
     } catch (e) {
       setMsg({ tipo: 'erro', texto: (e as Error).message });

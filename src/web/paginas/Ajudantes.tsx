@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ResumoPerfil } from '../../application/orquestracao';
 import { api } from '../api';
+import { streetVisto } from '../formato';
 import { Aviso, useCarregar } from './comum';
 import { BarraProgresso, ROTULO_SITUACAO_PERFIL } from './Orquestrador';
 
@@ -73,6 +74,7 @@ export function Ajudantes() {
             {p.pacotes > 0 && <BarraProgresso feitos={p.entregues + p.insucessos} total={p.pacotes} />}
             <div className="detalhe">
               <span className="fraco" title="helper_id: identidade usada pelo Street">ID <code>{p.ajudante.id.slice(0, 8)}</code></span>
+              <span className={`street-visto ${p.streetVistoEm ? '' : 'nunca'}`}>{streetVisto(p.streetVistoEm)}</span>
               <button type="button" onClick={() => alternarAtivo(p)}>{p.ajudante.ativo ? 'Desativar' : 'Ativar'}</button>
               <a href={`#/ajudantes/${p.ajudante.id}`}>perfil →</a>
             </div>

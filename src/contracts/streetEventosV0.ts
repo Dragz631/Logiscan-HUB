@@ -22,6 +22,8 @@ export const EventoStreetV0 = z.looseObject({
   ocorrido_em: z.string().min(1),
   /** Só INSUCESSO_REGISTRADO: por que não foi entregue. */
   motivo: z.string().optional(),
+  /** O texto que o ajudante copiou e colou para o cliente (entrega ou insucesso). Só texto; fotos vêm depois. */
+  texto: z.string().optional(),
   recebedor: z
     .object({ tipo: z.string().default(''), detalhes: z.string().default('') })
     .nullable()

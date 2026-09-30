@@ -11,7 +11,7 @@
  *  - Mesmo código repetido no próprio arquivo: igual conta uma vez; divergente não entra.
  */
 import type { DocumentoImportV0, PacoteImportV0 } from '../contracts/importV0';
-import { type DadosPacote, chaveNatural, diferencasDados, limparDados, normalizarCodigo } from './pacote';
+import { type DadosPacote, type EstadoPacote, chaveNatural, diferencasDados, limparDados, normalizarCodigo } from './pacote';
 
 export type ClasseItem =
   | 'PRONTO'
@@ -20,7 +20,9 @@ export type ClasseItem =
   | 'SEM_CODIGO'
   | 'REVISAO_EXTRACTOR'
   | 'DUPLICADO_NO_ARQUIVO'
-  | 'CONFLITO_NO_ARQUIVO';
+  | 'CONFLITO_NO_ARQUIVO'
+  /** O código foi DEVOLVIDO ao galpão (Novo dia) e chegou de novo: volta como disponível. */
+  | 'REABRIR';
 
 export type DecisaoConflito = 'manter_atual' | 'aceitar_novo';
 
@@ -44,6 +46,7 @@ export interface ItemPrevia {
 export interface PacoteExistente {
   id: string;
   dados: DadosPacote;
+  estado?: EstadoPacote;
 }
 
 /** O que cada classe significa para a confirmação. */
@@ -55,6 +58,7 @@ export const EFEITO_CLASSE: Record<ClasseItem, { entra: boolean; precisaDecisao:
   REVISAO_EXTRACTOR: { entra: false, precisaDecisao: false, rotulo: 'Revisão pendente no extractor' },
   DUPLICADO_NO_ARQUIVO: { entra: false, precisaDecisao: false, rotulo: 'Repetido no arquivo (igual)' },
   CONFLITO_NO_ARQUIVO: { entra: false, precisaDecisao: false, rotulo: 'Repetido no arquivo com dados diferentes' },
+  REABRIR: { entra: true, precisaDecisao: false, rotulo: 'Devolvido antes: reabre no galpão' },
 };
 
 export function dadosDoContrato(p: PacoteImportV0): DadosPacote {
@@ -123,6 +127,14 @@ export function classificarLote(
     }
 
     const existente = buscarExistente(codigo);
+    if (existente?.estado === 'DEVOLVIDO') {
+      return {
+        ...item,
+        classe: 'REABRIR',
+        pacoteExistenteId: existente.id,
+        motivos: ['este código foi devolvido ao galpão e chegou de novo: volta como disponível (dados antigos mantidos)'],
+      };
+    }
     if (existente) {
       const diferencas = diferencasDados(existente.dados, dados);
       if (diferencas.length === 0) return { ...item, classe: 'JA_EXISTE', pacoteExistenteId: existente.id };
@@ -151,7 +163,7 @@ export function resumirPrevia(itens: ItemPrevia[], decisoes: Record<number, Deci
   return {
     total: itens.length,
     porClasse,
-    entram: porClasse.PRONTO,
+    entram: porClasse.PRONTO + porClasse.REABRIR,
     conflitosSemDecisao: itens.filter((i) => i.classe === 'CONFLITO' && !decisoes[i.indice]).length,
   };
 }

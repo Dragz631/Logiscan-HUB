@@ -56,7 +56,7 @@ export function prepararImportacao(ctx: Contexto, entrada: { arquivo: string; co
 function classificar(ctx: Contexto, doc: DocumentoImportV0) {
   return classificarLote(doc, (codigo) => {
     const p = ctx.armazem.pacotes.porChave(doc.source, codigo);
-    return p ? { id: p.id, dados: p.dados } : undefined;
+    return p ? { id: p.id, dados: p.dados, estado: p.estado } : undefined;
   });
 }
 
@@ -137,6 +137,8 @@ export interface ResultadoConfirmacao {
   jaConfirmado: boolean;
   criados: number;
   conflitosResolvidos: number;
+  /** Códigos devolvidos ao galpão que chegaram de novo e foram reabertos. */
+  reabertos: number;
   naoEntraram: number;
 }
 
@@ -153,6 +155,7 @@ export function confirmarImportacao(ctx: Contexto, loteId: string, ator: string)
         jaConfirmado: true,
         criados: itens.filter((i) => i.classe === 'PRONTO').length,
         conflitosResolvidos: itens.filter((i) => i.classe === 'CONFLITO').length,
+        reabertos: itens.filter((i) => i.classe === 'REABRIR').length,
         naoEntraram: itens.filter((i) => !EFEITO_CLASSE[i.classe].entra && i.classe !== 'CONFLITO').length,
       };
     }
@@ -171,8 +174,22 @@ export function confirmarImportacao(ctx: Contexto, loteId: string, ator: string)
     const base = { ator, origem: 'importacao' as const, ocorridoEm: agora, registradoEm: agora };
     let criados = 0;
     let conflitosResolvidos = 0;
+    let reabertos = 0;
 
     for (const item of itens) {
+      if (item.classe === 'REABRIR' && item.pacoteExistenteId) {
+        registrarEvento(armazem, {
+          ...base,
+          id: ctx.ids.novo(),
+          pacoteId: item.pacoteExistenteId,
+          tipo: 'REABERTO_DO_GALPAO',
+          chaveIdempotencia: `reaberto:${loteId}:${item.indice}`,
+          dados: { loteId, arquivo: lote.arquivo },
+        });
+        armazem.lotes.atualizarItem({ ...item, pacoteId: item.pacoteExistenteId });
+        reabertos++;
+        continue;
+      }
       if (item.classe === 'PRONTO') {
         const destino = resolverDestino(ctx, item.dados, agora);
         const codigo = normalizarCodigo(item.codigo);
@@ -223,7 +240,8 @@ export function confirmarImportacao(ctx: Contexto, loteId: string, ator: string)
       jaConfirmado: false,
       criados,
       conflitosResolvidos,
-      naoEntraram: itens.length - criados - conflitosResolvidos,
+      reabertos,
+      naoEntraram: itens.length - criados - conflitosResolvidos - reabertos,
     };
   });
 }
