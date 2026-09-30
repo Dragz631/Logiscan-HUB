@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import type { ResumoPerfil } from '../../application/orquestracao';
 import { api } from '../api';
+import { useSessao } from '../contexto';
 import { streetVisto } from '../formato';
 import { Aviso, useCarregar } from './comum';
+import { Contas } from './Contas';
 import { BarraProgresso, ROTULO_SITUACAO_PERFIL } from './Orquestrador';
 
 /**
@@ -11,6 +13,7 @@ import { BarraProgresso, ROTULO_SITUACAO_PERFIL } from './Orquestrador';
  */
 export function Ajudantes() {
   const dados = useCarregar(() => api.orquestrador(), []);
+  const { perfil: logado } = useSessao();
   const [form, setForm] = useState({ nome: '', veiculo: '' });
   const [msg, setMsg] = useState<{ tipo: 'ok' | 'erro'; texto: string } | null>(null);
 
@@ -44,6 +47,7 @@ export function Ajudantes() {
   return (
     <section>
       <h1>Ajudantes</h1>
+      {logado?.master && <Contas onMudou={dados.recarregar} />}
       <p className="fraco">
         Cada ajudante é um perfil operacional, identificado pelo seu ID (não pelo nome nem pelo aparelho). Só perfil
         <b> ATIVO</b> recebe repasse e aparece no Street.

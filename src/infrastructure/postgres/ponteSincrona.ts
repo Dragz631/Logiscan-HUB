@@ -18,35 +18,8 @@ export interface ResultadoConsulta {
   rowCount: number;
 }
 
-/** Código da thread auxiliar (em texto para o arquivo único funcionar na Vercel e sob `tsx`). */
-const CODIGO_DA_THREAD = `
-const { workerData } = require('node:worker_threads');
-const { Client, types } = require('pg');
-types.setTypeParser(20, (v) => Number(v)); // int8 -> number (contadores e chaves inteiras)
-types.setTypeParser(1700, (v) => Number(v)); // numeric -> number
-const { sinal, porta, url, ssl } = workerData;
-const flag = new Int32Array(sinal);
-const cliente = new Client({ connectionString: url, ssl: ssl ? { rejectUnauthorized: false } : undefined });
-const pronto = cliente.connect();
-porta.on('message', async (m) => {
-  let resposta;
-  try {
-    await pronto;
-    if (m.fechar) {
-      await cliente.end();
-      resposta = { ok: true };
-    } else {
-      const r = await cliente.query({ text: m.sql, values: m.params });
-      resposta = { ok: true, rows: r.rows ?? [], rowCount: r.rowCount ?? 0 };
-    }
-  } catch (e) {
-    resposta = { ok: false, erro: { message: e.message, code: e.code, detail: e.detail, constraint: e.constraint } };
-  }
-  porta.postMessage(resposta);
-  Atomics.store(flag, 0, 1);
-  Atomics.notify(flag, 0);
-});
-`;
+/** A thread auxiliar é um arquivo próprio (`ponteThread.cjs`); o empacotador da Vercel o põe ao lado do servidor. */
+const ARQUIVO_DA_THREAD = new URL('./ponteThread.cjs', import.meta.url);
 
 export class ErroPostgres extends Error {
   constructor(
@@ -82,8 +55,7 @@ export class PonteSincrona {
     const canal = new MessageChannel();
     this.porta = canal.port1;
     this.tempoMaximoMs = opcoes.tempoMaximoMs ?? 50_000;
-    this.thread = new Worker(CODIGO_DA_THREAD, {
-      eval: true,
+    this.thread = new Worker(ARQUIVO_DA_THREAD, {
       workerData: { sinal, porta: canal.port2, url: opcoes.url, ssl: opcoes.ssl ?? false },
       transferList: [canal.port2],
     });

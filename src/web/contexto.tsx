@@ -1,5 +1,6 @@
 /** Estado de navegação e do operador (só interface; nada de dado operacional aqui). */
 import { createContext, useContext, useEffect, useState } from 'react';
+import type { PerfilDaSessao } from './sessao';
 
 /** Rota simples por hash (#/pacotes/123). */
 export function useRota(): string[] {
@@ -16,6 +17,10 @@ export function useRota(): string[] {
 export const ir = (caminho: string) => {
   window.location.hash = caminho;
 };
+
+/** Quem está logado (só com login; no HUB local sem login é `null`). */
+export const SessaoCtx = createContext<{ perfil: PerfilDaSessao | null }>({ perfil: null });
+export const useSessao = () => useContext(SessaoCtx);
 
 /** Operador = quem está usando o HUB agora; vai como `ator` em cada evento. */
 export const OperadorCtx = createContext<{ operador: string; exigir(): string | null }>({

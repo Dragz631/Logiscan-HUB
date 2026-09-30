@@ -20,4 +20,3 @@ dados-v08-teste/
 .env.*
 !.env.example
 .vercel
-api/

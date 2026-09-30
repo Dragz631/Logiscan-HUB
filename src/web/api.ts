@@ -14,6 +14,8 @@ import type { ResultadoConfirmacao, ResultadoPreparo, VisaoLote } from '../appli
 import type { ResultadoAtribuicaoItem } from '../application/operacao';
 import type { Ajudante, Lote } from '../application/portas';
 import type { DecisaoConflito } from '../domain/importacao';
+import type { ContaPublica, Papel } from '../domain/contas';
+import type { PerfilDaSessao } from './sessao';
 
 import { requisitar } from './requisicao';
 
@@ -27,6 +29,18 @@ function chamar<T>(caminho: string, init?: { method?: string; body?: unknown }):
 export const novaChave = () => crypto.randomUUID();
 
 export const api = {
+  // ---- Login e contas ----
+  eu: () => chamar<{ semLogin: true } | { semLogin: false; perfil: PerfilDaSessao }>('/eu'),
+  entrar: (usuario: string, pin: string) =>
+    chamar<{ token: string; renovar: string; perfil: PerfilDaSessao }>('/street/login', { body: { usuario, pin } }),
+  primeiroAcesso: (usuario: string, codigo: string, pin: string) =>
+    chamar<{ ok: true }>('/street/primeiro-acesso', { body: { usuario, codigo, pin } }),
+  sair: () => chamar<{ ok: true }>('/street/sair', { body: {} }),
+  contas: () => chamar<ContaPublica[]>('/contas'),
+  aprovarConta: (id: string, como: Papel, ligacao: { ajudanteId?: string; criarPerfilNovo?: boolean }) =>
+    chamar<ContaPublica>(`/contas/${id}/aprovar`, { body: { como, ...ligacao } }),
+  recusarConta: (id: string) => chamar<ContaPublica>(`/contas/${id}/recusar`, { body: {} }),
+
   resumo: () => chamar<ResumoInventario>('/resumo'),
   pacotes: (filtro: Record<string, string>) => {
     const q = new URLSearchParams(Object.entries(filtro).filter(([, v]) => v)).toString();
