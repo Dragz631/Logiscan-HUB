@@ -8,7 +8,7 @@
  * Sem botão "Entregar". Ações do HUB: iniciar/finalizar rota, reatribuir/remover rua (antes da rota), ver histórico.
  */
 import { useState } from 'react';
-import type { DetalhePerfil, Parada } from '../../application/orquestracao';
+import type { CaixaDoPerfil, DetalhePerfil, NumeroNaCaixa } from '../../application/orquestracao';
 import { descreverEvento } from '../../domain/eventos';
 import { api } from '../api';
 import { useOperador } from '../contexto';
@@ -27,30 +27,42 @@ const ESTADO_PACOTE_CLS: Record<string, string> = {
   ATRIBUIDO: 'pendente',
 };
 
-function CartaoParada({ parada }: { parada: Parada }) {
-  const [aberta, setAberta] = useState(parada.pacotes.length <= 3);
-  const pendentes = parada.pacotes.filter((p) => p.estado === 'EM_ROTA' || p.estado === 'ATRIBUIDO').length;
+const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
+
+/** Um NÚMERO da caixa, como o card de número do Street: vários pacotes/casas no mesmo número aparecem juntos. */
+function CartaoNumero({ n }: { n: NumeroNaCaixa }) {
+  const cls = n.pendentes === 0 && n.insucessos === 0 ? 'completo' : n.insucessos > 0 && n.pendentes === 0 ? 'com-falha' : '';
   return (
-    <div className="parada">
-      <div className="parada-topo">
+    <div className={`numero-card ${cls}`}>
+      <div className="numero-card-topo">
         <span className="numero-badge">
           <small>Nº</small>
-          {parada.numero}
+          {n.numero}
         </span>
-        <div className="parada-titulo">
-          <b>
-            {parada.titulo}
-            {parada.bairro ? ` • ${parada.bairro}` : ''}
-          </b>
+        <div className="numero-card-titulo">
+          <b>{n.rua}, {n.numero}</b>
           <span className="fraco">
-            {parada.pacotes.length} pacote(s) · <span className={pendentes ? 'pendente-txt' : 'ok-txt'}>{pendentes} pendente(s)</span>
+            {plural(n.total, 'pacote', 'pacotes')} • <span className={n.pendentes ? 'pendente-txt' : 'ok-txt'}>{plural(n.pendentes, 'pendente', 'pendentes')}</span>
+            {n.entregues > 0 && (
+              <>
+                {' '}• <span className="ok-txt">{plural(n.entregues, 'entregue', 'entregues')}</span>
+              </>
+            )}
+            {n.insucessos > 0 && (
+              <>
+                {' '}• <span className="alerta-txt">{plural(n.insucessos, 'insucesso', 'insucessos')}</span>
+              </>
+            )}
           </span>
+          {n.total > 1 && n.destinos.length === 1 && <span className="numero-aviso">{n.total} pacotes neste número</span>}
+          {n.destinos.length > 1 && <span className="numero-aviso atencao">{n.destinos.length} locais diferentes neste número</span>}
         </div>
       </div>
-      {aberta ? (
-        <ul className="parada-pacotes">
-          {parada.pacotes.map((p) => (
-            <li key={p.id}>
+      {n.destinos.map((d) => (
+        <ul key={d.destinoId} className="parada-pacotes">
+          {n.destinos.length > 1 && <li className="destino-titulo fraco">{d.titulo}</li>}
+          {d.pacotes.map((p) => (
+            <li key={p.id} className={`pacote-linha ${ESTADO_PACOTE_CLS[p.estado] ?? ''}`}>
               <b>{p.destinatario || '—'}</b>
               <a className="chip codigo" href={`#/pacotes/${p.id}`}>#{p.codigo.slice(-4)}</a>
               <span className={`chip estado-mini ${ESTADO_PACOTE_CLS[p.estado] ?? ''}`}>{ROTULO_PARADA[p.estado] ?? ROTULO_ESTADO[p.estado]}</span>
@@ -60,12 +72,49 @@ function CartaoParada({ parada }: { parada: Parada }) {
             </li>
           ))}
         </ul>
-      ) : (
-        <div className="parada-resumo">
+      ))}
+    </div>
+  );
+}
+
+/** Uma CAIXA que o ajudante recebeu: card com setinha; aberta, mostra os números em ordem crescente. */
+function CartaoCaixa({ c, abertaInicial }: { c: CaixaDoPerfil; abertaInicial: boolean }) {
+  const [aberta, setAberta] = useState(abertaInicial);
+  const titulo = c.numero ? `${c.numero} · ${c.nome}` : c.nome;
+  return (
+    <div className={`caixa-perfil-card ${c.pendentes === 0 ? 'completa' : ''}`}>
+      <button
+        type="button"
+        className="caixa-perfil-topo"
+        onClick={() => setAberta(!aberta)}
+        aria-expanded={aberta}
+        aria-label={`Caixa ${titulo}: ${c.total} pacote(s), ${c.pendentes} pendente(s)`}
+      >
+        <span className="seta">{aberta ? '▾' : '▸'}</span>
+        <span className="caixa-perfil-titulo">
+          <b>{titulo}</b>
           <span className="fraco">
-            Contém pacotes para: {parada.pacotes.map((p) => `${p.destinatario} (#${p.codigo.slice(-4)})`).join(', ')}
+            {plural(c.numeros.length, 'número', 'números')} • {plural(c.total, 'pacote', 'pacotes')} •{' '}
+            <span className={c.pendentes ? 'pendente-txt' : 'ok-txt'}>{plural(c.pendentes, 'pendente', 'pendentes')}</span>
+            {c.entregues > 0 && (
+              <>
+                {' '}• <span className="ok-txt">{plural(c.entregues, 'entregue', 'entregues')}</span>
+              </>
+            )}
+            {c.insucessos > 0 && (
+              <>
+                {' '}• <span className="alerta-txt">{plural(c.insucessos, 'insucesso', 'insucessos')}</span>
+              </>
+            )}
           </span>
-          <button type="button" className="link-mini" onClick={() => setAberta(true)}>Expandir lista ▾</button>
+        </span>
+        <span className="qtd">{c.pendentes}</span>
+      </button>
+      {aberta && (
+        <div className="caixa-perfil-numeros">
+          {c.numeros.map((n) => (
+            <CartaoNumero key={`${n.rua}|${n.numero}`} n={n} />
+          ))}
         </div>
       )}
     </div>
@@ -285,18 +334,22 @@ export function PerfilPagina({ id }: { id: string }) {
             </div>
           )}
 
-          {noStreet && (
+          {p.carga && (
             <>
               <div className="coluna-topo">
-                <h2 className="sem-margem">Sequência de paradas</h2>
-                <span className="fraco">Fila ativa: {p.paradas.length} endereço(s)</span>
+                <h2 className="sem-margem">Caixas de {a.nome}</h2>
+                <span className="fraco">{plural(p.caixasRecebidas.length, 'caixa', 'caixas')} • assim aparece no Street dele</span>
               </div>
               <div className="lista-cards">
-                {p.paradas.map((parada) => (
-                  <CartaoParada key={parada.destinoId} parada={parada} />
+                {p.caixasRecebidas.map((c) => (
+                  <CartaoCaixa key={c.chave} c={c} abertaInicial={p.caixasRecebidas.length === 1} />
                 ))}
               </div>
+            </>
+          )}
 
+          {noStreet && (
+            <>
               <h2>Últimas ocorrências</h2>
               <ol className="timeline">
                 {p.ocorrencias.map((e) => (

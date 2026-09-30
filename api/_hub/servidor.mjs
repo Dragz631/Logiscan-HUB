@@ -25200,6 +25200,35 @@ function montarParadas(pacotes, ruaDe) {
     (a, b) => a.rua.localeCompare(b.rua, "pt-BR") || numeroOrdem(a.numero) - numeroOrdem(b.numero) || a.titulo.localeCompare(b.titulo, "pt-BR")
   );
 }
+var ENTREGUES = ["ENTREGUE", "PRONTO_PARA_BAIXA", "BAIXADO"];
+function montarCaixas(pacotes, unidadeDe, ruaDe) {
+  const porCaixa = /* @__PURE__ */ new Map();
+  for (const p of pacotes) {
+    const u = unidadeDe(p);
+    if (!porCaixa.has(u.chave)) porCaixa.set(u.chave, { chave: u.chave, nome: u.nome, caixa: u.caixa, pacotes: [] });
+    porCaixa.get(u.chave).pacotes.push(p);
+  }
+  const contar = (ps) => {
+    const entregues = ps.filter((x) => ENTREGUES.includes(x.estado)).length;
+    const insucessos = ps.filter((x) => x.estado === "INSUCESSO").length;
+    return { total: ps.length, entregues, insucessos, pendentes: ps.length - entregues - insucessos };
+  };
+  const ordemCaixa2 = (c) => c.caixa?.ordem ?? Number.MAX_SAFE_INTEGER;
+  return [...porCaixa.values()].sort((a, b) => ordemCaixa2(a) - ordemCaixa2(b) || a.nome.localeCompare(b.nome, "pt-BR")).map((c) => {
+    const numeros = /* @__PURE__ */ new Map();
+    for (const parada of montarParadas(c.pacotes, ruaDe)) {
+      const chave = `${parada.ruaChave}|${parada.numero}`;
+      if (!numeros.has(chave)) numeros.set(chave, { rua: parada.rua, numero: parada.numero, total: 0, entregues: 0, insucessos: 0, pendentes: 0, destinos: [] });
+      const n = numeros.get(chave);
+      n.destinos.push(parada);
+      Object.assign(n, contar(n.destinos.flatMap((d) => d.pacotes)));
+    }
+    const lista = [...numeros.values()].sort(
+      (a, b) => a.rua.localeCompare(b.rua, "pt-BR") || numeroOrdem(a.numero) - numeroOrdem(b.numero) || a.numero.localeCompare(b.numero, "pt-BR")
+    );
+    return { chave: c.chave, numero: c.caixa?.numero ?? null, nome: c.nome, ...contar(c.pacotes), numeros: lista };
+  });
+}
 function ruasDaCarga(pacotes, ruaDe) {
   return agruparPorRua(pacotes, ruaDe).map((r) => ({
     chave: r.chave,
@@ -25223,6 +25252,7 @@ function detalharPerfil(ctx, ajudanteId) {
   const recebida = carga ? ctx.armazem.cargas.eventos(carga.id).filter((e) => e.tipo === "RECEBIDA_NO_STREET").at(-1) : void 0;
   return {
     ...r,
+    caixasRecebidas: montarCaixas(pacotes, unidadeDe, ruaDe),
     // Caixas da carga (a unidade que entra/sai da carga); as ruas de verdade aparecem nas paradas.
     ruasDaCarga: ruasDaCarga(pacotes, unidadeDe).map((x) => ({
       ...x,

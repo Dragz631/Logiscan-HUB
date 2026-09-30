@@ -430,3 +430,24 @@ button.link { background: none; border: 0; color: var(--destaque); padding: 0; t
 .form-aprovacao { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
 .form-aprovacao .opcoes { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
 .form-aprovacao select { margin-top: 0.3rem; max-width: 100%; }
+
+/* ---- Perfil do ajudante como o Street: caixa (card com setinha) -> números em ordem (V0.7) ---- */
+.caixa-perfil-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; margin-bottom: 0.6rem; overflow: hidden; }
+.caixa-perfil-card.completa { border-color: rgba(16, 185, 129, 0.45); }
+.caixa-perfil-topo { width: 100%; display: flex; align-items: center; gap: 0.75rem; padding: 0.8rem 0.9rem; background: transparent; border: 0; color: inherit; text-align: left; cursor: pointer; }
+.caixa-perfil-topo:hover { background: rgba(16, 185, 129, 0.06); }
+.caixa-perfil-topo .seta { color: #34d399; font-size: 1.1rem; width: 1rem; }
+.caixa-perfil-titulo { flex: 1; display: flex; flex-direction: column; gap: 0.15rem; }
+.caixa-perfil-titulo > b { font-size: 1rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.caixa-perfil-numeros { display: flex; flex-direction: column; gap: 0.5rem; padding: 0 0.75rem 0.75rem; }
+.numero-card { background: #0b1220; border: 1px solid #1e293b; border-radius: 12px; padding: 0.65rem 0.75rem; }
+.numero-card.completo { border-color: rgba(16, 185, 129, 0.4); }
+.numero-card.com-falha { border-color: rgba(244, 63, 94, 0.4); }
+.numero-card-topo { display: flex; gap: 0.75rem; align-items: flex-start; }
+.numero-card-titulo { display: flex; flex-direction: column; gap: 0.15rem; }
+.numero-aviso { font-size: 0.72rem; font-weight: 800; color: #6ee7b7; }
+.numero-aviso.atencao { color: #fcd34d; }
+.numero-card .parada-pacotes { margin: 0.5rem 0 0; }
+.numero-card .destino-titulo { list-style: none; font-size: 0.78rem; margin-top: 0.3rem; }
+.pacote-linha.ok { border-left: 3px solid #10b981; padding-left: 0.5rem; }
+.pacote-linha.falha { border-left: 3px solid #f43f5e; padding-left: 0.5rem; }

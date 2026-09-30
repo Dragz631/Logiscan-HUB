@@ -272,7 +272,34 @@ export interface Parada {
   pacotes: { id: string; codigo: string; destinatario: string; estado: Pacote['estado']; complemento: string; motivoInsucesso: string | null; provaIncompleta: boolean }[];
 }
 
+/** Um NÚMERO dentro de uma caixa (como o card de número do Street): pode ter vários pacotes, casas ou locais. */
+export interface NumeroNaCaixa {
+  rua: string;
+  numero: string;
+  total: number;
+  entregues: number;
+  insucessos: number;
+  pendentes: number;
+  /** Os destinos (local/endereço) deste número, cada um com seus pacotes. Mais de um = "locais diferentes neste número". */
+  destinos: Parada[];
+}
+
+/** Uma CAIXA que o ajudante recebeu, com os números dela em ordem crescente (a mesma arrumação do Street). */
+export interface CaixaDoPerfil {
+  chave: string;
+  /** "1", "1.2", "10.1"… (nulo = rua ainda sem caixa). */
+  numero: string | null;
+  nome: string;
+  total: number;
+  entregues: number;
+  insucessos: number;
+  pendentes: number;
+  numeros: NumeroNaCaixa[];
+}
+
 export interface DetalhePerfil extends ResumoPerfil {
+  /** As caixas recebidas, cada uma com seus números — é o que o Hugo vê como "o Street do ajudante". */
+  caixasRecebidas: CaixaDoPerfil[];
   ruasDaCarga: (RuaDoPerfil & { regiao: RegiaoDaRua })[];
   montadaEm: string | null;
   /** Sequência de paradas — só faz sentido quando a carga já está no Street. */
@@ -318,6 +345,44 @@ export function montarParadas(pacotes: Pacote[], ruaDe: (p: Pacote) => { chave: 
   );
 }
 
+const ENTREGUES = ['ENTREGUE', 'PRONTO_PARA_BAIXA', 'BAIXADO'];
+
+/** Caixas da carga → números em ordem crescente → destinos → pacotes (mesma arrumação do Street). */
+export function montarCaixas(
+  pacotes: Pacote[],
+  unidadeDe: (p: Pacote) => { chave: string; nome: string; caixa: Regiao | null },
+  ruaDe: (p: Pacote) => { chave: string; nome: string },
+): CaixaDoPerfil[] {
+  const porCaixa = new Map<string, { chave: string; nome: string; caixa: Regiao | null; pacotes: Pacote[] }>();
+  for (const p of pacotes) {
+    const u = unidadeDe(p);
+    if (!porCaixa.has(u.chave)) porCaixa.set(u.chave, { chave: u.chave, nome: u.nome, caixa: u.caixa, pacotes: [] });
+    porCaixa.get(u.chave)!.pacotes.push(p);
+  }
+  const contar = (ps: { estado: Pacote['estado'] }[]) => {
+    const entregues = ps.filter((x) => ENTREGUES.includes(x.estado)).length;
+    const insucessos = ps.filter((x) => x.estado === 'INSUCESSO').length;
+    return { total: ps.length, entregues, insucessos, pendentes: ps.length - entregues - insucessos };
+  };
+  const ordemCaixa = (c: { caixa: Regiao | null; nome: string }) => c.caixa?.ordem ?? Number.MAX_SAFE_INTEGER;
+  return [...porCaixa.values()]
+    .sort((a, b) => ordemCaixa(a) - ordemCaixa(b) || a.nome.localeCompare(b.nome, 'pt-BR'))
+    .map((c) => {
+      const numeros = new Map<string, NumeroNaCaixa>();
+      for (const parada of montarParadas(c.pacotes, ruaDe)) {
+        const chave = `${parada.ruaChave}|${parada.numero}`;
+        if (!numeros.has(chave)) numeros.set(chave, { rua: parada.rua, numero: parada.numero, total: 0, entregues: 0, insucessos: 0, pendentes: 0, destinos: [] });
+        const n = numeros.get(chave)!;
+        n.destinos.push(parada);
+        Object.assign(n, contar(n.destinos.flatMap((d) => d.pacotes)));
+      }
+      const lista = [...numeros.values()].sort(
+        (a, b) => a.rua.localeCompare(b.rua, 'pt-BR') || numeroOrdem(a.numero) - numeroOrdem(b.numero) || a.numero.localeCompare(b.numero, 'pt-BR'),
+      );
+      return { chave: c.chave, numero: c.caixa?.numero ?? null, nome: c.nome, ...contar(c.pacotes), numeros: lista };
+    });
+}
+
 export function ruasDaCarga(pacotes: Pacote[], ruaDe?: (p: Pacote) => { chave: string; nome: string }): RuaDoPerfil[] {
   return agruparPorRua(pacotes, ruaDe).map((r) => ({
     chave: r.chave,
@@ -345,6 +410,7 @@ export function detalharPerfil(ctx: Contexto, ajudanteId: string): DetalhePerfil
   const recebida = carga ? ctx.armazem.cargas.eventos(carga.id).filter((e) => e.tipo === 'RECEBIDA_NO_STREET').at(-1) : undefined;
   return {
     ...r,
+    caixasRecebidas: montarCaixas(pacotes, unidadeDe, ruaDe),
     // Caixas da carga (a unidade que entra/sai da carga); as ruas de verdade aparecem nas paradas.
     ruasDaCarga: ruasDaCarga(pacotes, unidadeDe).map((x) => ({
       ...x,
