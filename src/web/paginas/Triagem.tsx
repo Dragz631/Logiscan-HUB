@@ -5,14 +5,14 @@
  * A decisão vira memória: da próxima vez é automático. Nenhuma regra aqui: a tela mostra e chama a API.
  */
 import { useState } from 'react';
-import type { CaixaNaTriagem, PacoteTriagem, RuaSemCaixa } from '../../application/triagem';
+import type { CaixaNaTriagem, PacoteTriagem, PerguntaDeCaixa, RuaSemCaixa } from '../../application/triagem';
 import { api } from '../api';
 import { useOperador } from '../contexto';
 import { diaCurto } from '../formato';
 import { Aviso, useCarregar } from './comum';
 
 export const rotuloCaixa = (c: { numero: string | null; nome: string }) => (c.numero ? `${c.numero} · ${c.nome}` : c.nome);
-const ROTULO_ORIGEM = { manual: 'decidido por você', pessoa: 'pela pessoa', rua: 'pela rua' } as const;
+const ROTULO_ORIGEM = { manual: 'decidido por você', pessoa: 'pela pessoa', rua: 'pela rua', pergunta: 'precisa da sua resposta' } as const;
 
 /** Só caixas que recebem pacote (a que só agrupa, como Associações, fica de fora da escolha). */
 function EscolhaCaixa({ caixas, valor, onMudar, rotulo }: { caixas: CaixaNaTriagem[]; valor: string; onMudar: (v: string) => void; rotulo: string }) {
@@ -56,6 +56,39 @@ function LinhaPacote({ p, caixas, onMover, rotuloBotao }: {
         <span className="fraco">já saiu na carga</span>
       )}
     </li>
+  );
+}
+
+/**
+ * "É Carlos Seidl ou Manilha?": a rua do pacote é de uma caixa, mas o complemento cita o nome de outra. O HUB não
+ * escolhe pela rua; você responde e ele lembra dessa pessoa (nome + rua) para os próximos dias.
+ */
+function CartaoPergunta({ q, onResponder }: { q: PerguntaDeCaixa; onResponder: (p: PacoteTriagem, caixaId: string) => void }) {
+  const p = q.pacote;
+  return (
+    <div className="card-unidade pergunta-caixa" role="group" aria-label={`Pergunta sobre o pacote ${p.codigo.slice(-4)}`}>
+      <div className="topo">
+        <span className="info">
+          <b>
+            {p.rua}, {p.numero || 'S/N'}
+          </b>
+          <span className="fraco">
+            {p.destinatario || '—'} · complemento: <b>“{p.complemento}”</b> · <a href={`#/pacotes/${p.id}`}>#{p.codigo.slice(-4)}</a>
+          </span>
+        </span>
+      </div>
+      <p className="sem-margem">
+        A rua é da caixa <b>{rotuloCaixa(q.opcoes[0])}</b>, mas o complemento fala em{' '}
+        <b>{q.opcoes.slice(1).map(rotuloCaixa).join(' / ')}</b>. É qual?
+      </p>
+      <div className="linha">
+        {q.opcoes.map((c) => (
+          <button key={c.id} type="button" className="primario" onClick={() => onResponder(p, c.id)} aria-label={`${p.destinatario}: é ${rotuloCaixa(c)}`}>
+            É {rotuloCaixa(c)}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -182,11 +215,15 @@ export function Triagem() {
         <div className="coluna painel">
           <div className="painel-topo">
             <h2>Esperando você</h2>
-            <span className="selo-contagem">{v?.semCaixa.length ?? 0} rua(s)</span>
+            <span className="selo-contagem">
+              {v && v.perguntas.length > 0 ? `${v.perguntas.length} pergunta(s) · ` : ''}
+              {v?.semCaixa.length ?? 0} rua(s)
+            </span>
           </div>
           <div className="lista-cards">
+            {v?.perguntas.map((q) => <CartaoPergunta key={q.pacote.id} q={q} onResponder={porPacote} />)}
             {v?.semCaixa.map((g) => <GrupoSemCaixa key={g.ruaChave} g={g} caixas={caixas} onRua={porRua} onPacote={porPacote} />)}
-            {v && v.semCaixa.length === 0 && (
+            {v && v.semCaixa.length === 0 && v.perguntas.length === 0 && (
               <p className="fraco centro">Tudo nas caixas. <a href="#/">Ir para o repasse →</a></p>
             )}
           </div>

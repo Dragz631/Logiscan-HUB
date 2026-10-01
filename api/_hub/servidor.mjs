@@ -24686,6 +24686,20 @@ function chavePessoa(nome, ruaId) {
   const n = chaveTexto(nome);
   return n && ruaId ? `${n}|${ruaId}` : "";
 }
+var PALAVRAS_DE_RUA = /* @__PURE__ */ new Set(["rua", "avenida", "av", "travessa", "tv", "beco", "alameda", "estrada", "praca", "associacao"]);
+var LIGACOES2 = /* @__PURE__ */ new Set(["da", "do", "de", "dos", "das", "e"]);
+var MINIMO_DO_TERMO = 6;
+function termoDoNome(nome) {
+  const palavras = chaveTexto(nome).split(" ").filter(Boolean);
+  while (palavras.length > 0 && (PALAVRAS_DE_RUA.has(palavras[0]) || LIGACOES2.has(palavras[0]))) palavras.shift();
+  const termo = palavras.join(" ");
+  return termo.length >= MINIMO_DO_TERMO ? termo : "";
+}
+function caixasCitadas(complemento, candidatas, exceto) {
+  const texto3 = ` ${chaveTexto(complemento)} `;
+  if (texto3.trim() === "") return [];
+  return candidatas.filter((c) => c.id !== exceto && c.termos.some((t) => texto3.includes(` ${t} `))).map((c) => c.id);
+}
 function decidirCaixa(entrada) {
   if (entrada.manual && entrada.existe(entrada.manual)) return { caixaId: entrada.manual, origem: "manual" };
   if (entrada.pessoa && entrada.existe(entrada.pessoa)) return { caixaId: entrada.pessoa, origem: "pessoa" };
@@ -24966,6 +24980,7 @@ function resolvedorDeCaixa(ctx) {
   const pessoas = ctx.armazem.pessoas.todas();
   const agrupa = new Set([...regioes.values()].map((r) => r.paiId).filter((id) => !!id));
   const existe = (id) => regioes.has(id) && !agrupa.has(id);
+  const citaveis = caixasCitaveis(ctx, regioes, agrupa);
   return (p) => {
     const ident = identidadeDoNome(p, nomeDe);
     const rua = ruaDoPacote(p, conhecidas, nomeDe);
@@ -24976,8 +24991,32 @@ function resolvedorDeCaixa(ctx) {
       rua: conhecidas.get(rua.chave)?.regiaoId ?? null,
       existe
     });
+    if (d?.origem === "rua") {
+      const citadas = caixasCitadas(p.dados.complemento, citaveis, d.caixaId);
+      if (citadas.length > 0) {
+        const candidatas = [d.caixaId, ...citadas].map((id) => regioes.get(id));
+        return { caixa: null, origem: "pergunta", pergunta: { candidatas }, rua, pessoa };
+      }
+    }
     return { caixa: d ? regioes.get(d.caixaId) : null, origem: d?.origem ?? null, rua, pessoa };
   };
+}
+function caixasCitaveis(ctx, regioes, agrupa) {
+  const ruasPorCaixa = /* @__PURE__ */ new Map();
+  for (const a of ctx.armazem.regioes.associacoes().values()) {
+    if (!a.regiaoId) continue;
+    if (!ruasPorCaixa.has(a.regiaoId)) ruasPorCaixa.set(a.regiaoId, []);
+    ruasPorCaixa.get(a.regiaoId).push(a.ruaNome);
+  }
+  const lista = [];
+  for (const r of regioes.values()) {
+    if (agrupa.has(r.id) || r.repasseUnico) continue;
+    const doNome = termoDoNome(r.nome);
+    const dasRuas = r.paiId ? [] : (ruasPorCaixa.get(r.id) ?? []).map(termoDoNome);
+    const termos = [...new Set([doNome, ...dasRuas].filter(Boolean))];
+    if (termos.length > 0) lista.push({ id: r.id, termos });
+  }
+  return lista;
 }
 function identidadeDaRua(ctx) {
   const caixaDe = resolvedorDeCaixa(ctx);
@@ -47604,13 +47643,13 @@ function confirmarDestino(ctx, entrada) {
 
 // src/domain/listaAssociacao.ts
 var SEM_NOME = "Morador";
-var LIGACOES2 = /* @__PURE__ */ new Set(["de", "da", "do", "das", "dos", "e"]);
+var LIGACOES3 = /* @__PURE__ */ new Set(["de", "da", "do", "das", "dos", "e"]);
 function nomeParaLista(nome) {
   return nome.split(" ").map((palavra, i) => {
     if (!palavra) return palavra;
     const toda = palavra === palavra.toUpperCase() && palavra !== palavra.toLowerCase();
     const base = toda ? palavra.toLowerCase() : palavra;
-    if (i > 0 && LIGACOES2.has(base.toLowerCase())) return base.toLowerCase();
+    if (i > 0 && LIGACOES3.has(base.toLowerCase())) return base.toLowerCase();
     return base.charAt(0).toUpperCase() + base.slice(1);
   }).join(" ");
 }
@@ -47659,9 +47698,14 @@ function visaoTriagem(ctx) {
   const agrupam = new Set(regioes.map((r) => r.paiId).filter((id) => !!id));
   const contagem = /* @__PURE__ */ new Map();
   const sem = /* @__PURE__ */ new Map();
+  const perguntas = [];
   const pacotes = pacotesDaOperacao(ctx);
   for (const p of pacotes) {
     const c = caixaDe(p);
+    if (c.pergunta) {
+      perguntas.push({ pacote: linha(p, c), opcoes: c.pergunta.candidatas.map(refCaixa) });
+      continue;
+    }
     if (c.caixa) {
       contagem.set(c.caixa.id, (contagem.get(c.caixa.id) ?? 0) + 1);
       continue;
@@ -47673,7 +47717,7 @@ function visaoTriagem(ctx) {
   }
   for (const g of sem.values()) g.pacotes.sort((a, b) => numeroOrdem2(a.numero) - numeroOrdem2(b.numero) || a.numero.localeCompare(b.numero));
   const semCaixa = [...sem.values()].sort((a, b) => b.pacotes.length - a.pacotes.length || a.ruaNome.localeCompare(b.ruaNome, "pt-BR"));
-  const aguardando = semCaixa.reduce((n, g) => n + g.pacotes.length, 0);
+  const aguardando = semCaixa.reduce((n, g) => n + g.pacotes.length, 0) + perguntas.length;
   return {
     caixas: regioes.map((r) => ({
       id: r.id,
@@ -47684,6 +47728,7 @@ function visaoTriagem(ctx) {
       total: contagem.get(r.id) ?? 0
     })),
     semCaixa,
+    perguntas: perguntas.sort((a, b) => a.pacote.rua.localeCompare(b.pacote.rua, "pt-BR") || numeroOrdem2(a.pacote.numero) - numeroOrdem2(b.pacote.numero)),
     totalPacotes: pacotes.length,
     nasCaixas: pacotes.length - aguardando,
     aguardandoRevisao: aguardando

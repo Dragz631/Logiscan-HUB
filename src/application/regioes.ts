@@ -3,7 +3,7 @@
  * Rua conhecida → região automática. Rua nova → revisão humana; a decisão vira memória persistida.
  * Mudar a região de uma rua já conhecida é CONFLITO: só com confirmação explícita (e fica no histórico).
  */
-import { type OrigemCaixa, chavePessoa, decidirCaixa } from '../domain/caixas';
+import { type OrigemCaixa, caixasCitadas, chavePessoa, decidirCaixa, termoDoNome } from '../domain/caixas';
 import { idLogradouro, nomeQuaseIgual, normalizarCep, partesDoLogradouro, resolverLogradouro } from '../domain/destino/logradouro';
 import type { Pacote } from '../domain/pacote';
 import { type Associacao, type Regiao, type RuaConhecida, decidirAssociacao, resolverRegiao, ruaOperacional, type ResolucaoRegiao } from '../domain/regioes';
@@ -362,7 +362,10 @@ export function resolvedorDeRua(ctx: Contexto): (p: Pacote) => { chave: string; 
 export interface CaixaDoPacote {
   /** null = sem caixa: aguarda a revisão do Hugo na triagem. */
   caixa: Regiao | null;
-  origem: OrigemCaixa | null;
+  /** 'pergunta' = a rua diz uma caixa e o complemento cita outra: o Hugo escolhe (ver `pergunta`). */
+  origem: OrigemCaixa | 'pergunta' | null;
+  /** Só com origem 'pergunta': as caixas em dúvida (a da rua primeiro, depois as citadas no complemento). */
+  pergunta?: { candidatas: Regiao[] };
   /** Rua de verdade do pacote (para listar dentro da caixa). */
   rua: { chave: string; nome: string };
   /** Chave da pessoa (nome + rua) — memória por pessoa. */
@@ -381,6 +384,7 @@ export function resolvedorDeCaixa(ctx: Contexto): (p: Pacote) => CaixaDoPacote {
   const pessoas = ctx.armazem.pessoas.todas();
   const agrupa = new Set([...regioes.values()].map((r) => r.paiId).filter((id): id is string => !!id));
   const existe = (id: string) => regioes.has(id) && !agrupa.has(id); // caixa que só agrupa não recebe pacote
+  const citaveis = caixasCitaveis(ctx, regioes, agrupa);
   return (p) => {
     const ident = identidadeDoNome(p, nomeDe);
     const rua = ruaDoPacote(p, conhecidas, nomeDe);
@@ -391,8 +395,39 @@ export function resolvedorDeCaixa(ctx: Contexto): (p: Pacote) => CaixaDoPacote {
       rua: conhecidas.get(rua.chave)?.regiaoId ?? null,
       existe,
     });
+    // Decidido só "pela rua" e o complemento cita OUTRA caixa: não decide, pergunta (a pessoa/à mão já mandam antes).
+    if (d?.origem === 'rua') {
+      const citadas = caixasCitadas(p.dados.complemento, citaveis, d.caixaId);
+      if (citadas.length > 0) {
+        const candidatas = [d.caixaId, ...citadas].map((id) => regioes.get(id)!);
+        return { caixa: null, origem: 'pergunta', pergunta: { candidatas }, rua, pessoa };
+      }
+    }
     return { caixa: d ? regioes.get(d.caixaId)! : null, origem: d?.origem ?? null, rua, pessoa };
   };
+}
+
+/**
+ * Por quais nomes cada caixa pode ser CITADA num complemento: o nome da caixa e, nas caixas com ruas (Manilha,
+ * Quinta do Caju…), os nomes das ruas que o Hugo ensinou. Ficam de fora: caixas que só agrupam, "Diversos" (junta
+ * de tudo) e as ruas das associações (a rua delas é a de quem mora, não a da associação).
+ */
+function caixasCitaveis(ctx: Contexto, regioes: Map<string, Regiao>, agrupa: Set<string>): { id: string; termos: string[] }[] {
+  const ruasPorCaixa = new Map<string, string[]>();
+  for (const a of ctx.armazem.regioes.associacoes().values()) {
+    if (!a.regiaoId) continue;
+    if (!ruasPorCaixa.has(a.regiaoId)) ruasPorCaixa.set(a.regiaoId, []);
+    ruasPorCaixa.get(a.regiaoId)!.push(a.ruaNome);
+  }
+  const lista: { id: string; termos: string[] }[] = [];
+  for (const r of regioes.values()) {
+    if (agrupa.has(r.id) || r.repasseUnico) continue;
+    const doNome = termoDoNome(r.nome);
+    const dasRuas = r.paiId ? [] : (ruasPorCaixa.get(r.id) ?? []).map(termoDoNome);
+    const termos = [...new Set([doNome, ...dasRuas].filter(Boolean))];
+    if (termos.length > 0) lista.push({ id: r.id, termos });
+  }
+  return lista;
 }
 
 /** Identidade da rua do pacote (street_id) + caixa. Vai na carga para o Street. */

@@ -31,8 +31,8 @@ export interface PacoteTriagem {
   caixa: CaixaRef | null;
   /** "Retornado · do dia 26/09": AAAA-MM-DD de onde voltou para a caixa (null = não é retornado). */
   retornadoDia: string | null;
-  /** Por que está nessa caixa: à mão, memória da pessoa ou da rua. */
-  origem: 'manual' | 'pessoa' | 'rua' | null;
+  /** Por que está nessa caixa: à mão, memória da pessoa ou da rua ('pergunta' = a rua e o complemento dizem caixas diferentes). */
+  origem: 'manual' | 'pessoa' | 'rua' | 'pergunta' | null;
   /** Ainda no galpão, fora de carga: dá para mudar a caixa. */
   podeMover: boolean;
 }
@@ -43,6 +43,13 @@ export interface RuaSemCaixa {
   ruaNome: string;
   ceps: string[];
   pacotes: PacoteTriagem[];
+}
+
+/** A rua do pacote é de uma caixa, mas o complemento cita outra: o Hugo diz qual (a resposta vira memória da pessoa). */
+export interface PerguntaDeCaixa {
+  pacote: PacoteTriagem;
+  /** As caixas em dúvida: a da rua primeiro, depois a(s) citada(s) no complemento. */
+  opcoes: CaixaRef[];
 }
 
 export interface CaixaNaTriagem {
@@ -58,6 +65,8 @@ export interface CaixaNaTriagem {
 export interface VisaoTriagem {
   caixas: CaixaNaTriagem[];
   semCaixa: RuaSemCaixa[];
+  /** "É Carlos Seidl ou Manilha?": pacotes em que a rua e o complemento apontam caixas diferentes. */
+  perguntas: PerguntaDeCaixa[];
   totalPacotes: number;
   nasCaixas: number;
   aguardandoRevisao: number;
@@ -98,9 +107,14 @@ export function visaoTriagem(ctx: Contexto): VisaoTriagem {
   const agrupam = new Set(regioes.map((r) => r.paiId).filter((id): id is string => !!id));
   const contagem = new Map<string, number>();
   const sem = new Map<string, RuaSemCaixa>();
+  const perguntas: PerguntaDeCaixa[] = [];
   const pacotes = pacotesDaOperacao(ctx);
   for (const p of pacotes) {
     const c = caixaDe(p);
+    if (c.pergunta) {
+      perguntas.push({ pacote: linha(p, c), opcoes: c.pergunta.candidatas.map(refCaixa) });
+      continue;
+    }
     if (c.caixa) {
       contagem.set(c.caixa.id, (contagem.get(c.caixa.id) ?? 0) + 1);
       continue;
@@ -112,12 +126,13 @@ export function visaoTriagem(ctx: Contexto): VisaoTriagem {
   }
   for (const g of sem.values()) g.pacotes.sort((a, b) => numeroOrdem(a.numero) - numeroOrdem(b.numero) || a.numero.localeCompare(b.numero));
   const semCaixa = [...sem.values()].sort((a, b) => b.pacotes.length - a.pacotes.length || a.ruaNome.localeCompare(b.ruaNome, 'pt-BR'));
-  const aguardando = semCaixa.reduce((n, g) => n + g.pacotes.length, 0);
+  const aguardando = semCaixa.reduce((n, g) => n + g.pacotes.length, 0) + perguntas.length;
   return {
     caixas: regioes.map((r) => ({
       id: r.id, numero: r.numero, nome: r.nome, paiId: r.paiId, agrupa: agrupam.has(r.id), total: contagem.get(r.id) ?? 0,
     })),
     semCaixa,
+    perguntas: perguntas.sort((a, b) => a.pacote.rua.localeCompare(b.pacote.rua, 'pt-BR') || numeroOrdem(a.pacote.numero) - numeroOrdem(b.pacote.numero)),
     totalPacotes: pacotes.length,
     nasCaixas: pacotes.length - aguardando,
     aguardandoRevisao: aguardando,
