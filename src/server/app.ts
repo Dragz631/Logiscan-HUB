@@ -38,6 +38,7 @@ import {
 } from '../application/orquestracao';
 import { criarRegiao, definirRegiao, listarRegioes, mapaDeRegioes } from '../application/regioes';
 import { definirResponsavelDaAssociacao, listasDasAssociacoes } from '../application/associacoes';
+import { fechamentoDaCarga, relatorioDoDia } from '../application/fechamento';
 import { classificarPacote, classificarRua, pacotesDaCaixa, visaoTriagem } from '../application/triagem';
 import { detalharDia, encerrarDia, listarDias, previaNovoDia } from '../application/novoDia';
 import { pendenciasDaRota, repassarRota } from '../application/repasseRota';
@@ -318,6 +319,13 @@ export function criarApi(ctx: Contexto): express.Router {
   });
   api.get('/dias', (_req, res) => {
     res.json(listarDias(ctx));
+  });
+  /** FECHAMENTO: o resumo de uma rota (entregues, o que ficou, prova de cada entrega) e o relatório do dia. */
+  api.get('/cargas/:id/fechamento', (req, res) => {
+    res.json(fechamentoDaCarga(ctx, req.params.id as string));
+  });
+  api.get('/dias/:id/relatorio', (req, res) => {
+    res.json(relatorioDoDia(ctx, req.params.id as string));
   });
   api.get('/dias/:id', (req, res) => {
     res.json(detalharDia(ctx, req.params.id));

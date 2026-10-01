@@ -135,20 +135,20 @@ var require_ms = __commonJS({
     function fmtLong(ms) {
       var msAbs = Math.abs(ms);
       if (msAbs >= d) {
-        return plural2(ms, msAbs, d, "day");
+        return plural3(ms, msAbs, d, "day");
       }
       if (msAbs >= h) {
-        return plural2(ms, msAbs, h, "hour");
+        return plural3(ms, msAbs, h, "hour");
       }
       if (msAbs >= m) {
-        return plural2(ms, msAbs, m, "minute");
+        return plural3(ms, msAbs, m, "minute");
       }
       if (msAbs >= s) {
-        return plural2(ms, msAbs, s, "second");
+        return plural3(ms, msAbs, s, "second");
       }
       return ms + " ms";
     }
-    function plural2(ms, msAbs, n, name) {
+    function plural3(ms, msAbs, n, name) {
       var isPlural = msAbs >= n * 1.5;
       return Math.round(ms / n) + " " + name + (isPlural ? "s" : "");
     }
@@ -37410,8 +37410,8 @@ var error43 = () => {
       case "not_multiple_of":
         return `N\xFAmero inv\xE1lido: deve ser m\xFAltiplo de ${issue2.divisor}`;
       case "unrecognized_keys": {
-        const plural2 = issue2.keys.length > 1 ? "s" : "";
-        return `Chave${plural2} inv\xE1lida${plural2}: ${joinValues(issue2.keys, ", ")}`;
+        const plural3 = issue2.keys.length > 1 ? "s" : "";
+        return `Chave${plural3} inv\xE1lida${plural3}: ${joinValues(issue2.keys, ", ")}`;
       }
       case "invalid_key":
         return `Entrada inv\xE1lida n${translateOriginWithArticle(issue2.origin, "definite")}`;
@@ -37555,8 +37555,8 @@ var error44 = () => {
       case "not_multiple_of":
         return `N\xFAmero inv\xE1lido: deve ser m\xFAltiplo de ${issue2.divisor}`;
       case "unrecognized_keys": {
-        const plural2 = issue2.keys.length > 1 ? "s" : "";
-        return `Chave${plural2} inv\xE1lida${plural2}: ${joinValues(issue2.keys, ", ")}`;
+        const plural3 = issue2.keys.length > 1 ? "s" : "";
+        return `Chave${plural3} inv\xE1lida${plural3}: ${joinValues(issue2.keys, ", ")}`;
       }
       case "invalid_key":
         return `Entrada inv\xE1lida n${translateOriginWithArticle(issue2.origin, "definite")}`;
@@ -47861,6 +47861,43 @@ function definirResponsavelDaAssociacao(ctx, caixaId, responsavel) {
   return novo;
 }
 
+// src/domain/fechamento.ts
+function situacaoDoFechamento(total, entregues, insucessos) {
+  if (total > 0 && entregues === total) return "PERFEITA";
+  if (total > 0 && entregues + insucessos === total) return "CONCLUIDA";
+  return "PARCIAL";
+}
+var plural2 = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+var enderecoCurto = (e) => `${e.rua}, ${e.numero || "S/N"}${e.complemento ? ` \xB7 ${e.complemento}` : ""}`;
+var DEPOIS = { amanha: "ficou para amanh\xE3", galpao: "voltou ao galp\xE3o" };
+function textoDoRelatorioDoDia(e) {
+  const dia = `${e.dataRef.slice(8, 10)}/${e.dataRef.slice(5, 7)}/${e.dataRef.slice(0, 4)}`;
+  const total = e.rotas.reduce((n, r) => n + r.total, 0);
+  const entregues = e.rotas.reduce((n, r) => n + r.entregues, 0);
+  const falhas = e.rotas.flatMap((r) => r.falhas.map((x) => ({ ...x, quem: r.ajudante.nome })));
+  const linhas = [
+    `\u{1F4CB} *Relat\xF3rio do dia \u2014 ${dia}*${e.teste ? " (dia de teste)" : ""}`,
+    `\u2705 *Entregues:* ${entregues} de ${total} em ${plural2(e.rotas.length, "rota", "rotas")}`
+  ];
+  if (falhas.length > 0) linhas.push(`\u26A0\uFE0F *N\xE3o entregues:* ${falhas.length}`);
+  if (e.semResponsavel && e.semResponsavel.pacotes > 0) {
+    linhas.push(`\u{1F4E6} *Nas caixas sem ajudante:* ${e.semResponsavel.pacotes} (${DEPOIS[e.semResponsavel.destino]})`);
+  }
+  linhas.push("", "*Por ajudante:*");
+  for (const r of e.rotas) {
+    const selo = r.situacao === "PERFEITA" ? " \u{1F3C6} rota perfeita" : "";
+    linhas.push(`- *${r.ajudante.nome}*: ${r.entregues} de ${r.total}${r.insucessos ? ` \xB7 ${plural2(r.insucessos, "insucesso", "insucessos")}` : ""}${r.semDesfecho ? ` \xB7 ${r.semDesfecho} sem registro` : ""}${selo}`);
+  }
+  if (falhas.length > 0) {
+    linhas.push("", "*O que ficou de fora:*");
+    for (const x of falhas) {
+      const motivo = x.situacao === "INSUCESSO" ? `insucesso${x.motivo ? `: ${x.motivo}` : ""}` : "sem registro na rota";
+      linhas.push(`- *${x.destinatario || "Morador"}* \u2014 ${enderecoCurto(x)} (${x.quem} \xB7 ${motivo}${x.depois ? ` \xB7 ${DEPOIS[x.depois]}` : ""})`);
+    }
+  }
+  return linhas.join("\n");
+}
+
 // src/application/novoDia.ts
 var FEITOS = ["ENTREGUE", "PRONTO_PARA_BAIXA", "BAIXADO"];
 function cargasAbertas(ctx) {
@@ -48043,6 +48080,104 @@ function detalharDia(ctx, id) {
   const dia = ctx.armazem.dias.porId(id);
   if (!dia) throw new ErroAplicacao("DIA_INEXISTENTE", "dia n\xE3o encontrado", 404);
   return dia;
+}
+
+// src/application/fechamento.ts
+var ENTREGUES2 = ["ENTREGUE", "PRONTO_PARA_BAIXA", "BAIXADO"];
+function desfechoNaCarga(eventos, cargaId) {
+  let entrega;
+  let insucesso;
+  let ultimo = null;
+  let destino = null;
+  let passou = false;
+  for (const e of eventos) {
+    if (e.tipo === "ENTREGA_REGISTRADA" && e.dados.carga.id === cargaId) {
+      entrega = e;
+      ultimo = "entrega";
+      passou = true;
+    } else if (e.tipo === "INSUCESSO_REGISTRADO" && e.dados.carga.id === cargaId) {
+      insucesso = e;
+      ultimo = "insucesso";
+      passou = true;
+    } else if (e.tipo === "DIA_ENCERRADO" && e.dados.carga.id === cargaId) {
+      destino = e.dados.destino;
+      passou = true;
+    }
+  }
+  return { entrega: ultimo === "entrega" ? entrega : void 0, insucesso: ultimo === "insucesso" ? insucesso : void 0, destino, passou };
+}
+function fechamentoDaCarga(ctx, cargaId) {
+  const { armazem } = ctx;
+  const carga = armazem.cargas.porId(cargaId);
+  if (!carga) throw new ErroAplicacao("CARGA_INEXISTENTE", "carga n\xE3o encontrada", 404);
+  const unidadeDe = resolvedorDeUnidade(ctx);
+  const entregas = [];
+  const falhas = [];
+  const porCaixa = /* @__PURE__ */ new Map();
+  let total = 0;
+  for (const id of carga.pacoteIds) {
+    const p = armazem.pacotes.porId(id);
+    if (!p) continue;
+    const d = desfechoNaCarga(armazem.eventos.doPacote(p.id), carga.id);
+    if (p.cargaId !== carga.id && !d.passou) continue;
+    total++;
+    const entregue = !!d.entrega && ENTREGUES2.includes(p.estado);
+    const u = unidadeDe(p);
+    if (!porCaixa.has(u.chave)) porCaixa.set(u.chave, { numero: u.caixa?.numero ?? null, nome: u.nome, total: 0, entregues: 0, ordem: u.caixa?.ordem ?? Number.MAX_SAFE_INTEGER });
+    const cx = porCaixa.get(u.chave);
+    cx.total++;
+    const base = { pacoteId: p.id, codigo: p.codigo, destinatario: p.dados.destinatario, rua: p.dados.rua, numero: p.dados.numero, complemento: p.dados.complemento };
+    if (entregue && d.entrega) {
+      cx.entregues++;
+      entregas.push({
+        ...base,
+        quando: d.entrega.ocorridoEm,
+        recebedor: d.entrega.dados.recebedor,
+        texto: d.entrega.dados.texto?.trim() || null,
+        provaCompleta: p.confirmacaoEntrega?.status === "COMPLETA"
+      });
+    } else {
+      falhas.push({
+        ...base,
+        situacao: d.insucesso ? "INSUCESSO" : "SEM_DESFECHO",
+        motivo: d.insucesso?.dados.motivo ?? p.motivoInsucesso ?? null,
+        depois: d.destino
+      });
+    }
+  }
+  entregas.sort((a, b) => (a.quando ?? "").localeCompare(b.quando ?? "") || a.codigo.localeCompare(b.codigo));
+  const ultimaEntregaEm = entregas.length > 0 ? entregas[entregas.length - 1].quando ?? null : null;
+  const minutosNaRua = carga.rotaIniciadaEm && ultimaEntregaEm ? Math.max(0, Math.round((Date.parse(ultimaEntregaEm) - Date.parse(carga.rotaIniciadaEm)) / 6e4)) : null;
+  const insucessos = falhas.filter((f) => f.situacao === "INSUCESSO").length;
+  return {
+    cargaId: carga.id,
+    codigo: carga.codigo,
+    ajudante: { id: carga.ajudante.id, nome: carga.ajudante.nome },
+    saiuEm: carga.rotaIniciadaEm,
+    ultimaEntregaEm,
+    minutosNaRua,
+    total,
+    entregues: entregas.length,
+    insucessos,
+    semDesfecho: falhas.length - insucessos,
+    provasCompletas: entregas.filter((e) => e.provaCompleta).length,
+    situacao: situacaoDoFechamento(total, entregas.length, insucessos),
+    caixas: [...porCaixa.values()].sort((a, b) => a.ordem - b.ordem || a.nome.localeCompare(b.nome, "pt-BR")).map(({ ordem: _o, ...c }) => c),
+    entregas,
+    falhas
+  };
+}
+function relatorioDoDia(ctx, diaId) {
+  const dia = detalharDia(ctx, diaId);
+  const rotas = dia.resumo.cargas.filter((c) => c.situacao === "EM_ROTA").map((c) => fechamentoDaCarga(ctx, c.cargaId));
+  const entregues = rotas.reduce((n, r) => n + r.entregues, 0);
+  const total = rotas.reduce((n, r) => n + r.total, 0);
+  return {
+    dia,
+    rotas,
+    totais: { rotas: rotas.length, perfeitas: rotas.filter((r) => r.situacao === "PERFEITA").length, total, entregues, naoEntregues: total - entregues },
+    texto: textoDoRelatorioDoDia({ dataRef: dia.dataRef, teste: !dia.historico, rotas, semResponsavel: dia.resumo.semResponsavel ?? null })
+  };
 }
 
 // src/application/repasseRota.ts
@@ -48573,6 +48708,12 @@ function criarApi(ctx) {
   });
   api.get("/dias", (_req, res) => {
     res.json(listarDias(ctx));
+  });
+  api.get("/cargas/:id/fechamento", (req, res) => {
+    res.json(fechamentoDaCarga(ctx, req.params.id));
+  });
+  api.get("/dias/:id/relatorio", (req, res) => {
+    res.json(relatorioDoDia(ctx, req.params.id));
   });
   api.get("/dias/:id", (req, res) => {
     res.json(detalharDia(ctx, req.params.id));

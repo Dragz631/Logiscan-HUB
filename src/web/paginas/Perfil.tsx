@@ -15,6 +15,7 @@ import { useOperador } from '../contexto';
 import { ROTULO_ESTADO, dataHora, streetVisto } from '../formato';
 import { Aviso, useCarregar } from './comum';
 import { BarraProgresso, ROTULO_SITUACAO_PERFIL } from './Orquestrador';
+import { FechamentoDaRota } from './Fechamento';
 import { RepassarRota } from './RepassarRota';
 
 /** Na sequência de paradas, o que ainda não teve desfecho aparece como "Pendente" (visão do Street). */
@@ -332,6 +333,14 @@ export function PerfilPagina({ id }: { id: string }) {
                 Street dele (o Street confere o HUB sozinho com o perfil de {a.nome} ativo).
               </p>
             </div>
+          )}
+
+          {p.carga && p.carga.situacao !== 'MONTADA' && (
+            <FechamentoDaRota
+              key={`${p.carga.id}-${p.entregues}-${p.insucessos}`}
+              cargaId={p.carga.id}
+              abertoInicial={p.carga.situacao === 'CONCLUIDA'}
+            />
           )}
 
           {p.carga && (

@@ -144,6 +144,11 @@ function CardAjudante({ p, escolhido, aReceber, iniciando, onEscolher, onIniciar
         </span>
       </button>
       {p.pacotes > 0 && <BarraProgresso feitos={p.entregues + p.insucessos} total={p.pacotes} />}
+      {p.carga?.situacao === 'CONCLUIDA' && (
+        <a className={`selo-fechamento ${p.insucessos === 0 ? 'perfeito' : ''}`} href={`#/ajudantes/${a.id}`}>
+          {p.insucessos === 0 ? 'Dia perfeito' : 'Rota concluída'} · ver resumo
+        </a>
+      )}
       {bloqueio && (
         <p className="motivo" role="note">
           {bloqueio} {!a.ativo && <a href="#/ajudantes">Ir para Ajudantes →</a>}

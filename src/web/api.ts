@@ -3,6 +3,8 @@ import type { DetalheCarga, ResultadoRetorno, ResumoCarga } from '../application
 import type { DadosPerfil, DetalhePerfil, ResumoPerfil, RuaNoOrquestrador, UnidadeRepasse } from '../application/orquestracao';
 import type { RegiaoComRuas, ResultadoDefinicao } from '../application/regioes';
 import type { ListasDasAssociacoes } from '../application/associacoes';
+import type { RelatorioDoDia } from '../application/fechamento';
+import type { FechamentoDeRota } from '../domain/fechamento';
 import type { PacoteTriagem, ResultadoClassificacao, VisaoTriagem } from '../application/triagem';
 import type { PreviaNovoDia } from '../application/novoDia';
 import type { PendenciasDaRota, ResultadoRepasseRota } from '../application/repasseRota';
@@ -69,6 +71,8 @@ export const api = {
   encerrarDia: (destinos: Record<string, 'amanha' | 'galpao'>, historico: boolean, ator: string, chave: string, destinoSemResponsavel?: 'amanha' | 'galpao') =>
     chamar<{ dia: Dia; jaEncerrado: boolean }>('/novo-dia', { body: { destinos, historico, ator, chave, destinoSemResponsavel } }),
   dias: () => chamar<Dia[]>('/dias'),
+  fechamento: (cargaId: string) => chamar<FechamentoDeRota>(`/cargas/${cargaId}/fechamento`),
+  relatorioDoDia: (diaId: string) => chamar<RelatorioDoDia>(`/dias/${diaId}/relatorio`),
   pendenciasDaRota: (cargaId: string) => chamar<PendenciasDaRota>(`/cargas/${cargaId}/pendencias-da-rota`),
   repassarRota: (cargaId: string, paraAjudanteId: string, caixas: string[] | undefined, motivo: string, ator: string) =>
     chamar<ResultadoRepasseRota>(`/cargas/${cargaId}/repassar-rota`, {
