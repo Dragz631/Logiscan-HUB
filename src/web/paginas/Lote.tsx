@@ -11,8 +11,8 @@ const GRUPOS: { classe: ClasseItem; titulo: string; tom: 'alerta' | 'ok' | 'neut
   { classe: 'REVISAO_EXTRACTOR', titulo: 'Revisar no extractor', tom: 'alerta' },
   { classe: 'SEM_CODIGO', titulo: 'Sem código', tom: 'alerta' },
   { classe: 'CONFLITO_NO_ARQUIVO', titulo: 'Repetidos divergentes', tom: 'alerta' },
-  { classe: 'PRONTO', titulo: 'Prontos para entrar', tom: 'ok' },
-  { classe: 'REABRIR', titulo: 'Devolvidos que voltaram (reabrem)', tom: 'ok' },
+  { classe: 'PRONTO', titulo: 'Novos, prontos para entrar', tom: 'ok' },
+  { classe: 'REABRIR', titulo: 'Já estiveram aqui e voltam', tom: 'ok' },
   { classe: 'JA_EXISTE', titulo: 'Já no inventário', tom: 'neutro' },
   { classe: 'DUPLICADO_NO_ARQUIVO', titulo: 'Repetidos iguais', tom: 'neutro' },
 ];
@@ -87,7 +87,11 @@ export function LotePagina({ id }: { id: string }) {
       {previa && (
         <div className="barra-acao">
           <span>
-            <b>{v.resumo.entram}</b> pacote(s) vão entrar no inventário.
+            <b>{v.resumo.entram}</b> pacote(s) vão entrar no inventário
+            {v.resumo.porClasse.REABRIR > 0 && (
+              <> ({v.resumo.porClasse.PRONTO} novos + {v.resumo.porClasse.REABRIR} que voltam)</>
+            )}
+            .
             {v.resumo.conflitosSemDecisao > 0 && <> Falta decidir <b>{v.resumo.conflitosSemDecisao}</b> conflito(s).</>}
           </span>
           <button type="button" className="primario" disabled={v.resumo.conflitosSemDecisao > 0} onClick={confirmar}>
@@ -95,6 +99,12 @@ export function LotePagina({ id }: { id: string }) {
           </button>
           <button type="button" onClick={descartar}>Descartar</button>
         </div>
+      )}
+      {previa && v.resumo.porClasse.REABRIR > 0 && (
+        <Aviso tipo="info">
+          <b>{v.resumo.porClasse.REABRIR}</b> pacote(s) deste arquivo <b>já estiveram no HUB</b>: o Novo dia os devolveu ao galpão
+          e o mesmo código veio de novo. Eles <b>reabrem e entram de novo nas caixas</b>; não são pacotes novos nem repetidos.
+        </Aviso>
       )}
       {previa && (v.resumo.porClasse.REVISAO_EXTRACTOR > 0 || v.resumo.porClasse.SEM_CODIGO > 0) && (
         <Aviso tipo="info">

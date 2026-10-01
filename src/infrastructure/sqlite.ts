@@ -628,6 +628,7 @@ class Regioes implements RepositorioRegioes {
     numero: str(r.numero),
     ordem: r.ordem === null || r.ordem === undefined ? null : Number(r.ordem),
     paiId: str(r.pai_id),
+    responsavel: str(r.responsavel),
   });
   private assoc = (r: Linha): Associacao => ({
     ruaChave: String(r.rua_chave), ruaNome: String(r.rua_nome), regiaoId: str(r.regiao_id),
@@ -658,6 +659,9 @@ class Regioes implements RepositorioRegioes {
     this.db
       .prepare('UPDATE regioes SET nome=?, numero=?, ordem=?, pai_id=?, repasse_unico=? WHERE id=?')
       .run(c.nome, c.numero, c.ordem, c.paiId, c.repasseUnico ? 1 : 0, id);
+  }
+  definirResponsavel(id: string, responsavel: string | null) {
+    this.db.prepare('UPDATE regioes SET responsavel = ? WHERE id = ?').run(responsavel, id);
   }
   associacoes() {
     return new Map(this.db.prepare('SELECT * FROM regioes_ruas').all().map((r) => [String(r.rua_chave), this.assoc(r)] as const));

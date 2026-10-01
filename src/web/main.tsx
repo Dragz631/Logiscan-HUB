@@ -4,6 +4,7 @@ import { api } from './api';
 import { OperadorCtx, SessaoCtx, useRota } from './contexto';
 import './estilo.css';
 import { Ajudantes } from './paginas/Ajudantes';
+import { Associacoes } from './paginas/Associacoes';
 import { CargaPagina } from './paginas/Carga';
 import { Cargas } from './paginas/Cargas';
 import { Dias } from './paginas/Dias';
@@ -60,6 +61,7 @@ function Painel({ perfil, onSair }: { perfil: PerfilDaSessao | null; onSair: () 
   else if (pagina === 'triagem') conteudo = <Triagem />;
   else if (pagina === 'novo-dia') conteudo = <NovoDia />;
   else if (pagina === 'dias') conteudo = <Dias />;
+  else if (pagina === 'associacoes') conteudo = <Associacoes />;
   else if (pagina === 'cargas' && id) conteudo = <CargaPagina id={id} />;
   else if (pagina === 'cargas') conteudo = <Cargas />;
   else conteudo = <Orquestrador />;
@@ -81,6 +83,7 @@ function Painel({ perfil, onSair }: { perfil: PerfilDaSessao | null; onSair: () 
               <a href="#/cargas" className={ativo('cargas')}>Cargas</a>
               <a href="#/dias" className={ativo('dias') || ativo('novo-dia')}>Dias</a>
               <a href="#/ajudantes" className={ativo('ajudantes')}>Ajudantes</a>
+              <a href="#/associacoes" className={ativo('associacoes')}>Associações</a>
               <a href="#/regioes" className={ativo('regioes')}>Regiões</a>
               <span className="secao">Pacotes</span>
               <a href="#/importar" className={ativo('importar') || ativo('importacoes')}>Importar</a>

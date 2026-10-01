@@ -153,6 +153,8 @@ export interface RepositorioRegioes {
   eventos(ruaChave: string): EventoRegiao[];
   /** Nome/número/agrupamento da caixa (catálogo). */
   configurarCaixa(id: string, c: { nome: string; numero: string | null; ordem: number | null; paiId: string | null; repasseUnico: boolean }): void;
+  /** Responsável ("A/C") da associação; null apaga. */
+  definirResponsavel(id: string, responsavel: string | null): void;
 }
 
 /** Memória por PESSOA (nome + rua → caixa). */

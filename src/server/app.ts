@@ -37,6 +37,7 @@ import {
   removerRuaDaCarga,
 } from '../application/orquestracao';
 import { criarRegiao, definirRegiao, listarRegioes, mapaDeRegioes } from '../application/regioes';
+import { definirResponsavelDaAssociacao, listasDasAssociacoes } from '../application/associacoes';
 import { classificarPacote, classificarRua, pacotesDaCaixa, visaoTriagem } from '../application/triagem';
 import { detalharDia, encerrarDia, listarDias, previaNovoDia } from '../application/novoDia';
 import { pendenciasDaRota, repassarRota } from '../application/repasseRota';
@@ -95,6 +96,7 @@ const Esquemas = {
     chave: z.string().min(1),
     motivo: z.string().optional(),
   }),
+  responsavelAssociacao: z.object({ responsavel: z.string() }),
   triagemRua: z.object({ rua: z.string().min(1), caixaId: z.string().min(1), ator, substituir: z.boolean().optional() }),
   triagemPacote: z.object({
     pacoteId: z.string().min(1), caixaId: z.string().min(1), ator, substituir: z.boolean().optional(), motivo: z.string().optional(),
@@ -180,6 +182,15 @@ export function criarApi(ctx: Contexto): express.Router {
   });
 
   /** TRIAGEM: a mesa das caixas — o que já está em caixa e o que espera a revisão do Hugo. */
+  /** ASSOCIAÇÕES: a lista de pessoas e pacotes de cada uma (para mandar às mulheres) e o responsável ("A/C"). */
+  api.get('/associacoes', (_req, res) => {
+    res.json(listasDasAssociacoes(ctx));
+  });
+  api.put('/associacoes/:caixaId/responsavel', (req, res) => {
+    const b = corpo(Esquemas.responsavelAssociacao, req.body);
+    res.json({ responsavel: definirResponsavelDaAssociacao(ctx, req.params.caixaId as string, b.responsavel) });
+  });
+
   api.get('/triagem', (_req, res) => {
     res.json(visaoTriagem(ctx));
   });

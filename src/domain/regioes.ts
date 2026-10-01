@@ -26,6 +26,8 @@ export interface Regiao {
   ordem: number | null;
   /** Caixa que agrupa esta (ex.: "Associações" agrupa as 4 associações). */
   paiId: string | null;
+  /** Só nas associações: quem recebe a lista ("A/C" do cabeçalho). Ausente/null = sem responsável informado. */
+  responsavel?: string | null;
 }
 
 export interface Associacao {

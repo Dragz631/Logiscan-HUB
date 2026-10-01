@@ -451,3 +451,32 @@ button.link { background: none; border: 0; color: var(--destaque); padding: 0; t
 .numero-card .destino-titulo { list-style: none; font-size: 0.78rem; margin-top: 0.3rem; }
 .pacote-linha.ok { border-left: 3px solid #10b981; padding-left: 0.5rem; }
 .pacote-linha.falha { border-left: 3px solid #f43f5e; padding-left: 0.5rem; }
+
+/* ---- Associações (V0.7): uma lista por associação, para copiar ou imprimir ---- */
+.lista-assoc { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); align-items: start; }
+.cartao-assoc { background: var(--superficie); border: 1px solid var(--borda); border-radius: 12px; padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.assoc-topo { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; }
+.assoc-topo h2 { font-size: 1.05rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.campo-ac { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: var(--fraco); flex: 1; }
+.tabela-pessoas { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.tabela-pessoas th, .tabela-pessoas td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--borda); vertical-align: middle; }
+.tabela-pessoas th { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fraco); }
+.tabela-pessoas .num { text-align: right; width: 5rem; }
+.tabela-pessoas tfoot td { border-bottom: 0; border-top: 2px solid var(--borda); }
+.tabela-pessoas select { max-width: 11rem; }
+.texto-lista { white-space: pre-wrap; background: var(--fundo); border: 1px solid var(--borda); border-radius: 8px; padding: 0.6rem; font: inherit; font-size: 0.85rem; margin: 0.4rem 0 0; }
+.so-impressao { display: none; }
+
+@media print {
+  .lateral, .nao-imprimir { display: none !important; }
+  .app { display: block; }
+  body { background: #fff; color: #000; }
+  .modo-impressao .cartao-assoc:not(.imprimindo) { display: none !important; }
+  .cartao-assoc { border: 0; padding: 0; background: #fff; color: #000; break-inside: avoid; }
+  .lista-assoc { display: block; }
+  .so-impressao { display: block; margin: 0 0 0.5rem; font-weight: 600; }
+  .tabela-pessoas th, .tabela-pessoas td { border-bottom: 1px solid #999; color: #000; font-size: 12pt; }
+  .tabela-pessoas tfoot td { border-top: 2px solid #000; }
+  .assoc-topo .fraco { color: #333; }
+  .assoc-topo h2 { color: #000; }
+}

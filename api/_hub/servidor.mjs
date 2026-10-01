@@ -26519,7 +26519,8 @@ var Regioes = class {
     repasseUnico: Number(r.repasse_unico ?? 0) === 1,
     numero: str(r.numero),
     ordem: r.ordem === null || r.ordem === void 0 ? null : Number(r.ordem),
-    paiId: str(r.pai_id)
+    paiId: str(r.pai_id),
+    responsavel: str(r.responsavel)
   });
   assoc = (r) => ({
     ruaChave: String(r.rua_chave),
@@ -26545,6 +26546,9 @@ var Regioes = class {
   }
   configurarCaixa(id, c) {
     this.db.prepare("UPDATE regioes SET nome=?, numero=?, ordem=?, pai_id=?, repasse_unico=? WHERE id=?").run(c.nome, c.numero, c.ordem, c.paiId, c.repasseUnico ? 1 : 0, id);
+  }
+  definirResponsavel(id, responsavel) {
+    this.db.prepare("UPDATE regioes SET responsavel = ? WHERE id = ?").run(responsavel, id);
   }
   associacoes() {
     return new Map(this.db.prepare("SELECT * FROM regioes_ruas").all().map((r) => [String(r.rua_chave), this.assoc(r)]));
@@ -47598,6 +47602,32 @@ function confirmarDestino(ctx, entrada) {
   });
 }
 
+// src/domain/listaAssociacao.ts
+var SEM_NOME = "Morador";
+var LIGACOES2 = /* @__PURE__ */ new Set(["de", "da", "do", "das", "dos", "e"]);
+function nomeParaLista(nome) {
+  return nome.split(" ").map((palavra, i) => {
+    if (!palavra) return palavra;
+    const toda = palavra === palavra.toUpperCase() && palavra !== palavra.toLowerCase();
+    const base = toda ? palavra.toLowerCase() : palavra;
+    if (i > 0 && LIGACOES2.has(base.toLowerCase())) return base.toLowerCase();
+    return base.charAt(0).toUpperCase() + base.slice(1);
+  }).join(" ");
+}
+function agruparPessoas(pacotes) {
+  const porNome = /* @__PURE__ */ new Map();
+  for (const p of pacotes) {
+    const nome = nomeParaLista(p.destinatario.replace(/\s+/g, " ").trim() || SEM_NOME);
+    const chave = chaveTexto(nome) || chaveTexto(SEM_NOME);
+    if (!porNome.has(chave)) porNome.set(chave, { nome, pacotes: 0, pacoteIds: [], ruas: [] });
+    const g = porNome.get(chave);
+    g.pacotes++;
+    g.pacoteIds.push(p.id);
+    if (p.rua && !g.ruas.includes(p.rua)) g.ruas.push(p.rua);
+  }
+  return [...porNome.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { sensitivity: "base" }));
+}
+
 // src/application/triagem.ts
 var podeMover = (p) => p.cargaId === null && (p.estado === "NAO_ATRIBUIDO" || p.estado === "ATRIBUIDO" || p.estado === "RETORNADO");
 function pacotesDaOperacao(ctx) {
@@ -47735,6 +47765,55 @@ function classificarPacote(ctx, entrada) {
     }
     return { ok: true, mudou };
   });
+}
+
+// src/application/associacoes.ts
+var NUMERO_DO_GRUPO_ASSOCIACOES = "10";
+var MAX_RESPONSAVEL = 60;
+function filhasDoGrupo(ctx) {
+  const regioes = ctx.armazem.regioes.listar();
+  const grupo = regioes.find((r) => r.numero === NUMERO_DO_GRUPO_ASSOCIACOES);
+  return grupo ? regioes.filter((r) => r.paiId === grupo.id) : [];
+}
+function listasDasAssociacoes(ctx) {
+  const caixaDe = resolvedorDeCaixa(ctx);
+  const porCaixa = /* @__PURE__ */ new Map();
+  let aguardandoRevisao = 0;
+  for (const p of pacotesDaOperacao(ctx)) {
+    const c = caixaDe(p);
+    if (!c.caixa) {
+      aguardandoRevisao++;
+      continue;
+    }
+    if (!porCaixa.has(c.caixa.id)) porCaixa.set(c.caixa.id, []);
+    porCaixa.get(c.caixa.id).push(p);
+  }
+  const associacoes = filhasDoGrupo(ctx).map((f) => {
+    const pacotes = porCaixa.get(f.id) ?? [];
+    const pessoas = agruparPessoas(pacotes.map((p) => ({ id: p.id, destinatario: p.dados.destinatario, rua: p.dados.rua })));
+    return {
+      caixaId: f.id,
+      numero: f.numero,
+      nome: f.nome,
+      responsavel: f.responsavel ?? null,
+      totalPacotes: pacotes.length,
+      totalPessoas: pessoas.length,
+      pessoas
+    };
+  });
+  return { associacoes, aguardandoRevisao };
+}
+function definirResponsavelDaAssociacao(ctx, caixaId, responsavel) {
+  const caixa = ctx.armazem.regioes.porId(caixaId);
+  if (!caixa) throw new ErroAplicacao("REGIAO_INEXISTENTE", "associa\xE7\xE3o n\xE3o encontrada", 404);
+  if (!filhasDoGrupo(ctx).some((f) => f.id === caixa.id)) {
+    throw new ErroAplicacao("NAO_E_ASSOCIACAO", `${caixa.nome} n\xE3o \xE9 uma associa\xE7\xE3o: o respons\xE1vel da lista s\xF3 vale para elas`, 409);
+  }
+  const texto3 = (typeof responsavel === "string" ? responsavel : "").replace(/\s+/g, " ").trim();
+  if (texto3.length > MAX_RESPONSAVEL) throw new ErroAplicacao("ENTRADA_INVALIDA", `responsavel: no m\xE1ximo ${MAX_RESPONSAVEL} caracteres`);
+  const novo = texto3 || null;
+  ctx.armazem.regioes.definirResponsavel(caixa.id, novo);
+  return novo;
 }
 
 // src/application/novoDia.ts
@@ -48273,6 +48352,7 @@ var Esquemas = {
     chave: external_exports.string().min(1),
     motivo: external_exports.string().optional()
   }),
+  responsavelAssociacao: external_exports.object({ responsavel: external_exports.string() }),
   triagemRua: external_exports.object({ rua: external_exports.string().min(1), caixaId: external_exports.string().min(1), ator, substituir: external_exports.boolean().optional() }),
   triagemPacote: external_exports.object({
     pacoteId: external_exports.string().min(1),
@@ -48339,6 +48419,13 @@ function criarApi(ctx) {
   });
   api.post("/orquestrador/repasses", (req, res) => {
     res.json(confirmarRepasses(ctx, corpo(Esquemas.repasses, req.body)));
+  });
+  api.get("/associacoes", (_req, res) => {
+    res.json(listasDasAssociacoes(ctx));
+  });
+  api.put("/associacoes/:caixaId/responsavel", (req, res) => {
+    const b = corpo(Esquemas.responsavelAssociacao, req.body);
+    res.json({ responsavel: definirResponsavelDaAssociacao(ctx, req.params.caixaId, b.responsavel) });
   });
   api.get("/triagem", (_req, res) => {
     res.json(visaoTriagem(ctx));

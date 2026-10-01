@@ -2,6 +2,7 @@
 import type { DetalheCarga, ResultadoRetorno, ResumoCarga } from '../application/cargas';
 import type { DadosPerfil, DetalhePerfil, ResumoPerfil, RuaNoOrquestrador, UnidadeRepasse } from '../application/orquestracao';
 import type { RegiaoComRuas, ResultadoDefinicao } from '../application/regioes';
+import type { ListasDasAssociacoes } from '../application/associacoes';
 import type { PacoteTriagem, ResultadoClassificacao, VisaoTriagem } from '../application/triagem';
 import type { PreviaNovoDia } from '../application/novoDia';
 import type { PendenciasDaRota, ResultadoRepasseRota } from '../application/repasseRota';
@@ -73,6 +74,9 @@ export const api = {
     chamar<ResultadoRepasseRota>(`/cargas/${cargaId}/repassar-rota`, {
       body: { paraAjudanteId, caixas, motivo, ator, chave: novaChave() },
     }),
+  associacoes: () => chamar<ListasDasAssociacoes>('/associacoes'),
+  definirResponsavel: (caixaId: string, responsavel: string) =>
+    chamar<{ responsavel: string | null }>(`/associacoes/${caixaId}/responsavel`, { method: 'PUT', body: { responsavel } }),
   triagem: () => chamar<VisaoTriagem>('/triagem'),
   pacotesDaCaixa: (caixaId: string) => chamar<PacoteTriagem[]>(`/triagem/caixas/${caixaId}`),
   classificarRua: (rua: string, caixaId: string, ator: string, substituir = false) =>

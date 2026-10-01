@@ -65,7 +65,7 @@ export interface VisaoTriagem {
 
 const podeMover = (p: Pacote) => p.cargaId === null && (p.estado === 'NAO_ATRIBUIDO' || p.estado === 'ATRIBUIDO' || p.estado === 'RETORNADO');
 
-function pacotesDaOperacao(ctx: Contexto): Pacote[] {
+export function pacotesDaOperacao(ctx: Contexto): Pacote[] {
   const ativas = ctx.armazem.cargas.idsAtivas();
   return ctx.armazem.pacotes.listar().filter((p) => naOperacao(p, ativas));
 }
