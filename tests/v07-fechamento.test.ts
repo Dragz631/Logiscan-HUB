@@ -71,6 +71,19 @@ describe('fechamento de uma rota', () => {
     expect(f.caixas.map((c) => [c.numero, c.total, c.entregues])).toEqual([['1', 3, 2], ['3', 1, 0]]);
   });
 
+  it('1b. cada entrega diz de qual caixa saiu (é isso que organiza as provas por caixa na tela)', () => {
+    const { ctx, carga, entrega } = cenario();
+    entrega('S1', '14:00', { tipo: 'proprio_morador', detalhes: 'Maria' });
+    entrega('G1', '14:10', { tipo: 'vizinho', detalhes: 'Dona Rita' });
+    entrega('S3', '15:30', { tipo: 'proprio_morador', detalhes: 'Ana' });
+    const f = fechamentoDaCarga(ctx, carga.id);
+    const doNumero = (n: string) => f.caixas.find((c) => c.numero === n)!.chave;
+    const porCaixa = (n: string) => f.entregas.filter((e) => e.caixaChave === doNumero(n)).map((e) => e.destinatario);
+    expect(porCaixa('1')).toEqual(['Maria Souza', 'Ana Lúcia']); // na ordem em que foram entregues
+    expect(porCaixa('3')).toEqual(['Paulo Costa']);
+    expect(f.entregas.every((e) => f.caixas.some((c) => c.chave === e.caixaChave))).toBe(true);
+  });
+
   it('2. cada entrega traz quem recebeu, o texto de confirmação e a hora; a lista vem na ordem das entregas', () => {
     const { ctx, carga, entrega } = cenario();
     entrega('S3', '15:30', { tipo: 'vizinho', detalhes: 'Dona Rita' });
@@ -145,8 +158,8 @@ describe('texto do relatório (puro)', () => {
         cargaId: 'c', codigo: 'C-1', ajudante: { id: 'a', nome: 'Raul' }, saiuEm: '2026-10-01T14:49:00.000Z', ultimaEntregaEm: '2026-10-01T17:32:00.000Z', minutosNaRua: 163,
         total: 2, entregues: 2, insucessos: 0, semDesfecho: 0, provasCompletas: 0, situacao: 'PERFEITA', caixas: [],
         entregas: [
-          { pacoteId: '1', codigo: 'X1', destinatario: 'Ana M.', rua: 'Rua Tavares Guerra', numero: '41', complemento: 'Casa 4', quando: '2026-10-01T17:32:00.000Z', recebedor: { tipo: 'proprio_morador', detalhes: 'Ana' }, texto: 'Entrega realizada\nRecebido por: Ana', provaCompleta: false },
-          { pacoteId: '2', codigo: 'X2', destinatario: 'Carlos P.', rua: 'Rua General Sampaio', numero: '112', complemento: '', quando: '2026-10-01T16:48:00.000Z', recebedor: { tipo: 'portaria', detalhes: 'Seu Jorge' }, texto: null, provaCompleta: false },
+          { caixaChave: 'c1', pacoteId: '1', codigo: 'X1', destinatario: 'Ana M.', rua: 'Rua Tavares Guerra', numero: '41', complemento: 'Casa 4', quando: '2026-10-01T17:32:00.000Z', recebedor: { tipo: 'proprio_morador', detalhes: 'Ana' }, texto: 'Entrega realizada\nRecebido por: Ana', provaCompleta: false },
+          { caixaChave: 'c1', pacoteId: '2', codigo: 'X2', destinatario: 'Carlos P.', rua: 'Rua General Sampaio', numero: '112', complemento: '', quando: '2026-10-01T16:48:00.000Z', recebedor: { tipo: 'portaria', detalhes: 'Seu Jorge' }, texto: null, provaCompleta: false },
         ],
         falhas: [],
       },

@@ -68,7 +68,7 @@ export function fechamentoDaCarga(ctx: Contexto, cargaId: string): FechamentoDeR
 
     const entregue = !!d.entrega && ENTREGUES.includes(p.estado);
     const u = unidadeDe(p);
-    if (!porCaixa.has(u.chave)) porCaixa.set(u.chave, { numero: u.caixa?.numero ?? null, nome: u.nome, total: 0, entregues: 0, ordem: u.caixa?.ordem ?? Number.MAX_SAFE_INTEGER });
+    if (!porCaixa.has(u.chave)) porCaixa.set(u.chave, { chave: u.chave, numero: u.caixa?.numero ?? null, nome: u.nome, total: 0, entregues: 0, ordem: u.caixa?.ordem ?? Number.MAX_SAFE_INTEGER });
     const cx = porCaixa.get(u.chave)!;
     cx.total++;
 
@@ -77,6 +77,7 @@ export function fechamentoDaCarga(ctx: Contexto, cargaId: string): FechamentoDeR
       cx.entregues++;
       entregas.push({
         ...base,
+        caixaChave: u.chave,
         quando: d.entrega.ocorridoEm,
         recebedor: d.entrega.dados.recebedor,
         texto: d.entrega.dados.texto?.trim() || null,

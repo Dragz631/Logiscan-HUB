@@ -94,16 +94,7 @@ export function FechamentoDaRota({ cargaId, abertoInicial }: { cargaId: string; 
         </div>
       )}
 
-      {f.entregas.length > 0 && (
-        <div className="cartao">
-          <h3>Prova de cada entrega ({f.entregas.length})</h3>
-          <ul className="provas">
-            {f.entregas.map((e) => (
-              <ProvaDaEntrega key={e.pacoteId} e={e} />
-            ))}
-          </ul>
-        </div>
-      )}
+      {f.entregas.length > 0 && <ProvasPorCaixa f={f} />}
 
       {msg && <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>}
       <div className="linha">
@@ -111,6 +102,64 @@ export function FechamentoDaRota({ cargaId, abertoInicial }: { cargaId: string; 
         <button type="button" onClick={() => imprimirTexto(`Relatório da rota — ${f.ajudante.nome}`, texto)}>Imprimir</button>
       </div>
     </section>
+  );
+}
+
+/** A prova de cada entrega, ORGANIZADA POR CAIXA: cada caixa abre e fecha; fechadas, cabem na tela sem rolar. */
+function ProvasPorCaixa({ f }: { f: FechamentoDeRota }) {
+  const [abertas, setAbertas] = useState<ReadonlySet<string>>(new Set());
+  const grupos = f.caixas
+    .map((c) => ({ c, entregas: f.entregas.filter((e) => e.caixaChave === c.chave) }))
+    .filter((g) => g.entregas.length > 0);
+  const alternar = (chave: string) =>
+    setAbertas((atual) => {
+      const novo = new Set(atual);
+      if (!novo.delete(chave)) novo.add(chave);
+      return novo;
+    });
+  const todasAbertas = grupos.every((g) => abertas.has(g.c.chave));
+  return (
+    <div className="cartao">
+      <div className="provas-cabecalho">
+        <h3>Prova de cada entrega ({f.entregas.length})</h3>
+        <button type="button" className="link-mini" onClick={() => setAbertas(todasAbertas ? new Set() : new Set(grupos.map((g) => g.c.chave)))}>
+          {todasAbertas ? 'Fechar todas as caixas' : 'Abrir todas as caixas'}
+        </button>
+      </div>
+      {grupos.map(({ c, entregas }) => {
+        const aberta = abertas.has(c.chave);
+        const titulo = c.numero ? `${c.numero} · ${c.nome}` : c.nome;
+        const pendentes = entregas.filter((e) => !e.provaCompleta).length;
+        return (
+          <div key={c.chave} className="caixa-perfil-card completa">
+            <button
+              type="button"
+              className="caixa-perfil-topo"
+              onClick={() => alternar(c.chave)}
+              aria-expanded={aberta}
+              aria-label={`Caixa ${titulo}: ${plural(entregas.length, 'entrega', 'entregas')}`}
+            >
+              <span className="seta">{aberta ? '▾' : '▸'}</span>
+              <span className="caixa-perfil-titulo">
+                <b>{titulo}</b>
+                <span className="fraco">
+                  {plural(entregas.length, 'entrega', 'entregas')} • <span className="ok-txt">{c.entregues} de {c.total} entregues</span>
+                  {pendentes > 0 && <> • <span className="pendente-txt">{plural(pendentes, 'foto pendente', 'fotos pendentes')}</span></>}
+                </span>
+              </span>
+              <span className="qtd">{entregas.length}</span>
+            </button>
+            {aberta && (
+              <ul className="provas provas-da-caixa">
+                {entregas.map((e) => (
+                  <ProvaDaEntrega key={e.pacoteId} e={e} />
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

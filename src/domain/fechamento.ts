@@ -8,6 +8,8 @@
 import { dataEHoraSP } from './listaAssociacao';
 
 export interface EntregaDoFechamento {
+  /** A caixa de onde o pacote saiu (mesma `chave` de `CaixaDoFechamento`): é o que agrupa as provas na tela. */
+  caixaChave: string;
   pacoteId: string;
   codigo: string;
   destinatario: string;
@@ -38,6 +40,7 @@ export interface FalhaDoFechamento {
 }
 
 export interface CaixaDoFechamento {
+  chave: string;
   numero: string | null;
   nome: string;
   total: number;

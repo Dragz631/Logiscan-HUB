@@ -508,5 +508,8 @@ button.link { background: none; border: 0; color: var(--destaque); padding: 0; t
 .prova-topo { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
 .prova-topo .hora { margin-left: auto; font-size: 0.8rem; color: var(--fraco); }
 .prova-recebedor { font-size: 0.88rem; border-left: 3px solid var(--ok); padding-left: 0.5rem; }
+.provas-cabecalho { display: flex; align-items: baseline; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.provas-cabecalho h3 { margin: 0; }
+.provas-da-caixa { padding: 0 0.9rem 0.6rem; }
 .relatorio-dia { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; }
 @media print { .selo-fechamento { display: none; } }
